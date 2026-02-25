@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ cert.common_name }} - Cert Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center">
+    <h2>{{ cert.common_name }}</h2>
+    <div>
+        <div class="btn-group">
+            <a href="{{ url_for('certificates.download', cert_id=cert.id, format='pem') }}" class="btn btn-sm btn-outline-primary">PEM</a>
+            <a href="{{ url_for('certificates.download', cert_id=cert.id, format='der') }}" class="btn btn-sm btn-outline-primary">DER</a>
+            {% if cert.private_key_enc %}
+            <a href="{{ url_for('certificates.download', cert_id=cert.id, format='pkcs12') }}" class="btn btn-sm btn-outline-primary">PKCS#12</a>
+            <a href="{{ url_for('certificates.download_key', cert_id=cert.id) }}" class="btn btn-sm btn-outline-warning">Key</a>
+            {% endif %}
+        </div>
+        {% if not cert.is_revoked %}
+        <a href="{{ url_for('certificates.revoke', cert_id=cert.id) }}" class="btn btn-sm btn-danger ms-2">Revoke</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">Certificate Information</div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr><th>Common Name</th><td>{{ cert.common_name }}</td></tr>
+                    <tr><th>Serial Number</th><td><code style="word-break:break-all">{{ cert.serial_number }}</code></td></tr>
+                    <tr>
+                        <th>Issuing CA</th>
+                        <td><a href="{{ url_for('ca.detail', ca_id=cert.ca_id) }}">{{ cert.ca.name }}</a></td>
+                    </tr>
+                    <tr><th>Key Type</th><td>{{ cert.key_type }} {{ cert.key_size }}</td></tr>
+                    <tr><th>Valid From</th><td>{{ cert.not_before.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
+                    <tr><th>Valid Until</th><td>{{ cert.not_after.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
+                    <tr>
+                        <th>Status</th>
+                        <td>
+                            {% if cert.is_revoked %}
+                            <span class="badge bg-danger">Revoked</span>
+                            ({{ cert.revocation_reason }}, {{ cert.revoked_at.strftime('%Y-%m-%d %H:%M UTC') }})
+                            {% else %}
+                            <span class="badge bg-success">Active</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr><th>Private Key</th><td>{{ "Available" if cert.private_key_enc else "Not stored" }}</td></tr>
+                    <tr><th>Created</th><td>{{ cert.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        {% if san_list %}
+        <div class="card mb-3">
+            <div class="card-header">Subject Alternative Names</div>
+            <div class="card-body">
+                <ul class="list-unstyled mb-0">
+                {% for san in san_list %}
+                    <li><code>{{ san }}</code></li>
+                {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card mb-3">
+            <div class="card-header">Certificate PEM</div>
+            <div class="card-body">
+                <pre class="bg-light p-2" style="max-height:200px;overflow:auto;font-size:0.75rem">{{ cert.certificate_pem }}</pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

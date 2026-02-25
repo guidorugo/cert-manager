@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-me-to-a-random-secret-key}
+      - MASTER_PASSPHRASE=${MASTER_PASSPHRASE:-change-me-to-a-strong-passphrase}
+      - DATABASE_URL=sqlite:////app/data/cert-manager.db
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - SERVER_NAME_FOR_OCSP=${SERVER_NAME_FOR_OCSP:-localhost:5000}
+    restart: unless-stopped

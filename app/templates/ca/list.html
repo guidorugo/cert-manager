@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Certificate Authorities - Cert Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center">
+    <h2>Certificate Authorities</h2>
+    <a href="{{ url_for('ca.create') }}" class="btn btn-primary">Create CA</a>
+</div>
+
+<table class="table mt-3">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Common Name</th>
+            <th>Type</th>
+            <th>Key</th>
+            <th>Valid Until</th>
+            <th>Issued Certs</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for ca in cas %}
+        <tr>
+            <td><a href="{{ url_for('ca.detail', ca_id=ca.id) }}">{{ ca.name }}</a></td>
+            <td>{{ ca.common_name }}</td>
+            <td>{{ "Root" if ca.is_root else "Intermediate" }}</td>
+            <td>{{ ca.key_type }} {{ ca.key_size }}</td>
+            <td>{{ ca.not_after.strftime('%Y-%m-%d') }}</td>
+            <td>{{ ca.certificates.count() }}</td>
+            <td>
+                <a href="{{ url_for('ca.detail', ca_id=ca.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+            </td>
+        </tr>
+    {% else %}
+        <tr><td colspan="7" class="text-muted text-center">No CAs found.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

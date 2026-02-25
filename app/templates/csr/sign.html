@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sign CSR - Cert Manager{% endblock %}
+{% block content %}
+<h2>Sign CSR: {{ csr.common_name }}</h2>
+
+<div class="card mt-3">
+    <div class="card-body">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label for="ca_id" class="form-label">Signing CA</label>
+                <select class="form-select" id="ca_id" name="ca_id" required>
+                    {% for ca in cas %}
+                    <option value="{{ ca.id }}">{{ ca.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mb-3">
+                <label for="validity_days" class="form-label">Validity (days)</label>
+                <input type="number" class="form-control" id="validity_days" name="validity_days" value="365">
+            </div>
+            <button type="submit" class="btn btn-success">Sign CSR</button>
+            <a href="{{ url_for('csr.detail', csr_id=csr.id) }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

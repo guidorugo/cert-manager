@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ ca.name }} - Cert Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center">
+    <h2>{{ ca.name }}</h2>
+    <div>
+        <a href="{{ url_for('public.download_ca_cert', ca_id=ca.id) }}" class="btn btn-outline-primary btn-sm">Download CA Cert</a>
+        <form method="POST" action="{{ url_for('ca.generate_crl', ca_id=ca.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-warning btn-sm">Generate CRL</button>
+        </form>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">CA Information</div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr><th>Common Name</th><td>{{ ca.common_name }}</td></tr>
+                    <tr><th>Type</th><td>{{ "Root CA" if ca.is_root else "Intermediate CA" }}</td></tr>
+                    {% if ca.parent %}
+                    <tr><th>Parent CA</th><td><a href="{{ url_for('ca.detail', ca_id=ca.parent.id) }}">{{ ca.parent.name }}</a></td></tr>
+                    {% endif %}
+                    <tr><th>Serial Number</th><td><code>{{ ca.serial_number }}</code></td></tr>
+                    <tr><th>Key Type</th><td>{{ ca.key_type }} {{ ca.key_size }}</td></tr>
+                    <tr><th>Valid From</th><td>{{ ca.not_before.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
+                    <tr><th>Valid Until</th><td>{{ ca.not_after.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
+                    <tr><th>Path Length</th><td>{{ ca.path_length if ca.path_length is not none else "Unlimited" }}</td></tr>
+                    <tr><th>CRL Number</th><td>{{ ca.crl_number }}</td></tr>
+                    <tr><th>Created</th><td>{{ ca.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">Public Endpoints</div>
+            <div class="card-body">
+                <p><strong>CA Certificate:</strong><br>
+                    <a href="{{ url_for('public.download_ca_cert', ca_id=ca.id) }}">{{ url_for('public.download_ca_cert', ca_id=ca.id, _external=True) }}</a>
+                </p>
+                <p><strong>CRL (DER):</strong><br>
+                    <a href="{{ url_for('public.download_crl_der', ca_id=ca.id) }}">{{ url_for('public.download_crl_der', ca_id=ca.id, _external=True) }}</a>
+                </p>
+                <p><strong>CRL (PEM):</strong><br>
+                    <a href="{{ url_for('public.download_crl_pem', ca_id=ca.id) }}">{{ url_for('public.download_crl_pem', ca_id=ca.id, _external=True) }}</a>
+                </p>
+                <p><strong>OCSP Responder:</strong><br>
+                    <code>{{ url_for('public.ocsp_responder', ca_id=ca.id, _external=True) }}</code>
+                </p>
+            </div>
+        </div>
+        <div class="card mb-3">
+            <div class="card-header">Certificate Chain (PEM)</div>
+            <div class="card-body">
+                <pre class="bg-light p-2" style="max-height:200px;overflow:auto;font-size:0.75rem">{{ chain }}</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Issued Certificates</h5>
+        <a href="{{ url_for('certificates.create') }}" class="btn btn-sm btn-primary">Issue Certificate</a>
+    </div>
+    <div class="card-body">
+        <table class="table table-sm">
+            <thead><tr><th>CN</th><th>Serial</th><th>Status</th><th>Valid Until</th><th>Actions</th></tr></thead>
+            <tbody>
+            {% for cert in ca.certificates %}
+            <tr>
+                <td><a href="{{ url_for('certificates.detail', cert_id=cert.id) }}">{{ cert.common_name }}</a></td>
+                <td><code>{{ cert.serial_number[:16] }}...</code></td>
+                <td>
+                    {% if cert.is_revoked %}
+                    <span class="badge bg-danger">Revoked</span>
+                    {% else %}
+                    <span class="badge bg-success">Active</span>
+                    {% endif %}
+                </td>
+                <td>{{ cert.not_after.strftime('%Y-%m-%d') }}</td>
+                <td>
+                    <a href="{{ url_for('certificates.detail', cert_id=cert.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted text-center">No certificates issued yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if ca.children %}
+<div class="card mt-3">
+    <div class="card-header"><h5 class="mb-0">Sub CAs</h5></div>
+    <div class="card-body">
+        <table class="table table-sm">
+            <thead><tr><th>Name</th><th>Common Name</th><th>Valid Until</th></tr></thead>
+            <tbody>
+            {% for child in ca.children %}
+            <tr>
+                <td><a href="{{ url_for('ca.detail', ca_id=child.id) }}">{{ child.name }}</a></td>
+                <td>{{ child.common_name }}</td>
+                <td>{{ child.not_after.strftime('%Y-%m-%d') }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

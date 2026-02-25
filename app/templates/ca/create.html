@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Create CA - Cert Manager{% endblock %}
+{% block content %}
+<h2>Create Certificate Authority</h2>
+
+<form method="POST" class="mt-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card mb-3">
+                <div class="card-header">CA Settings</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">CA Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required placeholder="My Root CA">
+                    </div>
+                    <div class="mb-3">
+                        <label for="ca_type" class="form-label">CA Type</label>
+                        <select class="form-select" id="ca_type" name="ca_type" onchange="toggleParent()">
+                            <option value="root">Root CA</option>
+                            <option value="intermediate">Intermediate CA</option>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="parent_div" style="display:none">
+                        <label for="parent_id" class="form-label">Parent CA</label>
+                        <select class="form-select" id="parent_id" name="parent_id">
+                            <option value="">-- Select Parent CA --</option>
+                            {% for ca in cas %}
+                            <option value="{{ ca.id }}">{{ ca.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="key_type" class="form-label">Key Type</label>
+                                <select class="form-select" id="key_type" name="key_type" onchange="updateKeySizes()">
+                                    <option value="RSA">RSA</option>
+                                    <option value="EC">EC</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="key_size" class="form-label">Key Size</label>
+                                <select class="form-select" id="key_size" name="key_size">
+                                    <option value="2048">2048</option>
+                                    <option value="4096">4096</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="validity_days" class="form-label">Validity (days)</label>
+                                <input type="number" class="form-control" id="validity_days" name="validity_days" value="3650">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="path_length" class="form-label">Path Length</label>
+                                <input type="number" class="form-control" id="path_length" name="path_length" placeholder="Unlimited">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card mb-3">
+                <div class="card-header">Subject</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="cn" class="form-label">Common Name (CN)</label>
+                        <input type="text" class="form-control" id="cn" name="cn" required placeholder="My Root CA">
+                    </div>
+                    <div class="mb-3">
+                        <label for="org" class="form-label">Organization (O)</label>
+                        <input type="text" class="form-control" id="org" name="org">
+                    </div>
+                    <div class="mb-3">
+                        <label for="ou" class="form-label">Organizational Unit (OU)</label>
+                        <input type="text" class="form-control" id="ou" name="ou">
+                    </div>
+                    <div class="mb-3">
+                        <label for="country" class="form-label">Country (C)</label>
+                        <input type="text" class="form-control" id="country" name="country" maxlength="2" placeholder="US">
+                    </div>
+                    <div class="mb-3">
+                        <label for="state" class="form-label">State (ST)</label>
+                        <input type="text" class="form-control" id="state" name="state">
+                    </div>
+                    <div class="mb-3">
+                        <label for="locality" class="form-label">Locality (L)</label>
+                        <input type="text" class="form-control" id="locality" name="locality">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Create CA</button>
+    <a href="{{ url_for('ca.list_cas') }}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleParent() {
+    const caType = document.getElementById('ca_type').value;
+    document.getElementById('parent_div').style.display = caType === 'intermediate' ? 'block' : 'none';
+}
+function updateKeySizes() {
+    const keyType = document.getElementById('key_type').value;
+    const keySizeSelect = document.getElementById('key_size');
+    keySizeSelect.innerHTML = '';
+    if (keyType === 'RSA') {
+        keySizeSelect.add(new Option('2048', '2048'));
+        keySizeSelect.add(new Option('4096', '4096'));
+    } else {
+        keySizeSelect.add(new Option('256', '256'));
+        keySizeSelect.add(new Option('384', '384'));
+    }
+}
+</script>
+{% endblock %}
