@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
 from flask_login import login_required
 
 from ..extensions import db
@@ -6,6 +6,19 @@ from ..models.ca import CertificateAuthority
 from ..services import ca_service, crl_service
 
 ca_bp = Blueprint("ca", __name__, url_prefix="/ca")
+
+MAX_FILE_SIZE = 64 * 1024  # 64KB
+
+
+def _get_pem_input(req, textarea_field, file_field):
+    """Get PEM input from file upload (preferred) or textarea fallback."""
+    uploaded = req.files.get(file_field)
+    if uploaded and uploaded.filename:
+        data = uploaded.read()
+        if len(data) > MAX_FILE_SIZE:
+            raise ValueError(f"Uploaded file exceeds 64KB size limit.")
+        return data.decode("utf-8").strip()
+    return req.form.get(textarea_field, "").strip()
 
 
 @ca_bp.route("/")
@@ -19,55 +32,108 @@ def list_cas():
 @login_required
 def create():
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        cn = request.form.get("cn", "").strip()
-        org = request.form.get("org", "").strip()
-        ou = request.form.get("ou", "").strip()
-        country = request.form.get("country", "").strip()
-        state = request.form.get("state", "").strip()
-        locality = request.form.get("locality", "").strip()
-        key_type = request.form.get("key_type", "RSA")
-        key_size = int(request.form.get("key_size", "2048"))
-        validity_days = int(request.form.get("validity_days", "3650"))
-        ca_type = request.form.get("ca_type", "root")
-        parent_id = request.form.get("parent_id")
-        path_length_str = request.form.get("path_length", "").strip()
-        path_length = int(path_length_str) if path_length_str else None
+        mode = request.form.get("mode", "generate")
 
-        if not name or not cn:
-            flash("Name and Common Name are required.", "danger")
-            return render_template("ca/create.html",
-                                   cas=CertificateAuthority.query.all())
+        if mode == "upload":
+            name = request.form.get("name", "").strip()
+            if not name:
+                flash("CA Name is required.", "danger")
+                return render_template("ca/create.html",
+                                       cas=CertificateAuthority.query.all())
 
-        subject_attrs = {
-            "CN": cn, "O": org, "OU": ou,
-            "C": country, "ST": state, "L": locality,
-        }
-        passphrase = current_app.config["MASTER_PASSPHRASE"]
+            try:
+                cert_pem = _get_pem_input(request, "cert_pem", "cert_file")
+                key_pem = _get_pem_input(request, "key_pem", "key_file")
+            except ValueError as e:
+                flash(str(e), "danger")
+                return render_template("ca/create.html",
+                                       cas=CertificateAuthority.query.all())
 
-        try:
-            if ca_type == "intermediate" and parent_id:
-                parent_ca = db.session.get(CertificateAuthority, int(parent_id))
-                if not parent_ca:
-                    flash("Parent CA not found.", "danger")
-                    return render_template("ca/create.html",
-                                           cas=CertificateAuthority.query.all())
-                ca = ca_service.create_intermediate_ca(
-                    name, parent_ca, subject_attrs, key_type, key_size,
-                    validity_days, passphrase, path_length=path_length,
-                )
-            else:
-                ca = ca_service.create_root_ca(
-                    name, subject_attrs, key_type, key_size,
-                    validity_days, passphrase, path_length=path_length,
-                )
-            flash(f"CA '{ca.name}' created successfully.", "success")
-            return redirect(url_for("ca.detail", ca_id=ca.id))
-        except Exception as e:
-            flash(f"Error creating CA: {e}", "danger")
+            if not cert_pem:
+                flash("Certificate PEM is required.", "danger")
+                return render_template("ca/create.html",
+                                       cas=CertificateAuthority.query.all())
+            if not key_pem:
+                flash("Private Key PEM is required.", "danger")
+                return render_template("ca/create.html",
+                                       cas=CertificateAuthority.query.all())
+
+            upload_parent_id = request.form.get("upload_parent_id")
+            parent_id = upload_parent_id if upload_parent_id else None
+            passphrase = current_app.config["MASTER_PASSPHRASE"]
+
+            try:
+                ca = ca_service.import_ca(name, cert_pem, key_pem, passphrase,
+                                          parent_id=parent_id)
+                flash(f"CA '{ca.name}' imported successfully.", "success")
+                return redirect(url_for("ca.detail", ca_id=ca.id))
+            except ValueError as e:
+                flash(str(e), "danger")
+            except Exception as e:
+                flash(f"Error importing CA: {e}", "danger")
+
+        else:
+            # Generate mode - existing logic
+            name = request.form.get("name", "").strip()
+            cn = request.form.get("cn", "").strip()
+            org = request.form.get("org", "").strip()
+            ou = request.form.get("ou", "").strip()
+            country = request.form.get("country", "").strip()
+            state = request.form.get("state", "").strip()
+            locality = request.form.get("locality", "").strip()
+            key_type = request.form.get("key_type", "RSA")
+            key_size = int(request.form.get("key_size", "2048"))
+            validity_days = int(request.form.get("validity_days", "3650"))
+            ca_type = request.form.get("ca_type", "root")
+            parent_id = request.form.get("parent_id")
+            path_length_str = request.form.get("path_length", "").strip()
+            path_length = int(path_length_str) if path_length_str else None
+
+            if not name or not cn:
+                flash("Name and Common Name are required.", "danger")
+                return render_template("ca/create.html",
+                                       cas=CertificateAuthority.query.all())
+
+            subject_attrs = {
+                "CN": cn, "O": org, "OU": ou,
+                "C": country, "ST": state, "L": locality,
+            }
+            passphrase = current_app.config["MASTER_PASSPHRASE"]
+
+            try:
+                if ca_type == "intermediate" and parent_id:
+                    parent_ca = db.session.get(CertificateAuthority, int(parent_id))
+                    if not parent_ca:
+                        flash("Parent CA not found.", "danger")
+                        return render_template("ca/create.html",
+                                               cas=CertificateAuthority.query.all())
+                    ca = ca_service.create_intermediate_ca(
+                        name, parent_ca, subject_attrs, key_type, key_size,
+                        validity_days, passphrase, path_length=path_length,
+                    )
+                else:
+                    ca = ca_service.create_root_ca(
+                        name, subject_attrs, key_type, key_size,
+                        validity_days, passphrase, path_length=path_length,
+                    )
+                flash(f"CA '{ca.name}' created successfully.", "success")
+                return redirect(url_for("ca.detail", ca_id=ca.id))
+            except Exception as e:
+                flash(f"Error creating CA: {e}", "danger")
 
     cas = CertificateAuthority.query.all()
     return render_template("ca/create.html", cas=cas)
+
+
+@ca_bp.route("/detect-parent", methods=["POST"])
+@login_required
+def detect_parent():
+    cert_pem = request.form.get("cert_pem", "").strip()
+    if not cert_pem:
+        return jsonify({"is_self_signed": None, "parent_id": None})
+
+    is_self_signed, parent_id = ca_service.detect_parent_ca(cert_pem)
+    return jsonify({"is_self_signed": is_self_signed, "parent_id": parent_id})
 
 
 @ca_bp.route("/<int:ca_id>")
