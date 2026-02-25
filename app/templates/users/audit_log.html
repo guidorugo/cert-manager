@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Audit Log - Cert Manager{% endblock %}
+{% block content %}
+<h2>Audit Log</h2>
+
+<table class="table table-sm mt-3">
+    <thead>
+        <tr>
+            <th>Timestamp</th>
+            <th>User</th>
+            <th>Action</th>
+            <th>Target</th>
+            <th>IP Address</th>
+            <th>Details</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for entry in logs.items %}
+        <tr>
+            <td>{{ entry.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</td>
+            <td>{{ entry.username }}</td>
+            <td><code>{{ entry.action }}</code></td>
+            <td>
+                {% if entry.target_type %}
+                {{ entry.target_type }}{% if entry.target_id %} #{{ entry.target_id }}{% endif %}
+                {% else %}-{% endif %}
+            </td>
+            <td>{{ entry.ip_address }}</td>
+            <td>
+                {% if entry.details %}
+                <small class="text-muted">{{ entry.details }}</small>
+                {% else %}-{% endif %}
+            </td>
+        </tr>
+    {% else %}
+        <tr><td colspan="6" class="text-muted text-center">No audit log entries.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% if logs.pages > 1 %}
+<nav>
+    <ul class="pagination justify-content-center">
+        {% if logs.has_prev %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('users.audit_log', page=logs.prev_num) }}">Previous</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">Previous</span></li>
+        {% endif %}
+
+        {% for p in logs.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+            {% if p %}
+                {% if p == logs.page %}
+                <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+                {% else %}
+                <li class="page-item"><a class="page-link" href="{{ url_for('users.audit_log', page=p) }}">{{ p }}</a></li>
+                {% endif %}
+            {% else %}
+                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+            {% endif %}
+        {% endfor %}
+
+        {% if logs.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('users.audit_log', page=logs.next_num) }}">Next</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">Next</span></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}
