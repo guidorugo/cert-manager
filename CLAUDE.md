@@ -59,7 +59,7 @@ python -m pytest tests/ -v
 
 ## Security Hardening
 - **Insecure default rejection**: App refuses to start in non-debug, non-testing mode if `SECRET_KEY` or `MASTER_PASSPHRASE` are set to their insecure defaults (`sys.exit(1)`).
-- **Session cookies**: HttpOnly, SameSite=Lax. Secure flag opt-in via `SESSION_COOKIE_SECURE=true` (for TLS proxy setups).
+- **Session cookies**: HttpOnly, SameSite=Lax.
 - **Session timeout**: Configurable via `SESSION_LIFETIME_MINUTES` (default 30).
 - **Schema migration**: `_migrate_schema()` in `app/__init__.py` handles adding new columns to existing SQLite tables via ALTER TABLE.
 - **Last-admin guards**: Cannot deactivate or demote the last active admin user.
@@ -70,7 +70,6 @@ python -m pytest tests/ -v
 - `DATABASE_URL` - SQLAlchemy database URI
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` - Default admin credentials
 - `SERVER_NAME_FOR_OCSP` - Hostname for OCSP AIA URLs (default: localhost:5000)
-- `SESSION_COOKIE_SECURE` - Require HTTPS for session cookies (default: false, set to true behind a TLS proxy)
 - `SESSION_LIFETIME_MINUTES` - Session timeout in minutes (default: 30)
 - `RATE_LIMIT_ENABLED` - Enable rate limiting (default: false, requires Flask-Limiter)
 - `RATE_LIMIT_DEFAULT` - Default rate limit when enabled (default: 60/minute)
