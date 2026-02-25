@@ -4,6 +4,7 @@ SQLAlchemy==2.0.46
 Flask-SQLAlchemy==3.1.1
 Flask-WTF==1.2.2
 Flask-Login==0.6.3
+python-dotenv==1.2.1
 gunicorn==25.1.0
 # Optional: uncomment to enable rate limiting
 # Flask-Limiter==3.12
