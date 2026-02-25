@@ -65,8 +65,6 @@ def _check_security(app):
 
 def _configure_session(app):
     """Set session cookie security flags."""
-    if not app.debug:
-        app.config["SESSION_COOKIE_SECURE"] = True
 
     @app.before_request
     def make_session_permanent():
