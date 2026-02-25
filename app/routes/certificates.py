@@ -4,25 +4,25 @@ from flask import (
     Blueprint, render_template, redirect, url_for, flash,
     request, current_app, Response,
 )
-from flask_login import login_required
 
+from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.certificate import Certificate
-from ..services import cert_service, crl_service
+from ..services import cert_service, crl_service, audit_service
 
 certificates_bp = Blueprint("certificates", __name__, url_prefix="/certificates")
 
 
 @certificates_bp.route("/")
-@login_required
+@admin_required
 def list_certs():
     certs = Certificate.query.order_by(Certificate.created_at.desc()).all()
     return render_template("certificates/list.html", certs=certs)
 
 
 @certificates_bp.route("/create", methods=["GET", "POST"])
-@login_required
+@admin_required
 def create():
     if request.method == "POST":
         ca_id = int(request.form.get("ca_id"))
@@ -64,6 +64,8 @@ def create():
                 ca, subject_attrs, san_list, validity_days, passphrase,
                 key_type=key_type, key_size=key_size, ocsp_url=ocsp_url,
             )
+            audit_service.log_action("create_certificate", target_type="certificate", target_id=certificate.id)
+            db.session.commit()
             flash(f"Certificate '{certificate.common_name}' created.", "success")
             return redirect(url_for("certificates.detail", cert_id=certificate.id))
         except Exception as e:
@@ -74,7 +76,7 @@ def create():
 
 
 @certificates_bp.route("/<int:cert_id>")
-@login_required
+@admin_required
 def detail(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
@@ -86,7 +88,7 @@ def detail(cert_id):
 
 
 @certificates_bp.route("/<int:cert_id>/revoke", methods=["GET", "POST"])
-@login_required
+@admin_required
 def revoke(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
@@ -97,6 +99,9 @@ def revoke(cert_id):
         reason = request.form.get("reason", "unspecified")
         try:
             crl_service.revoke_certificate(cert_id, reason)
+            audit_service.log_action("revoke_certificate", target_type="certificate", target_id=cert_id,
+                                     details={"reason": reason})
+            db.session.commit()
             flash(f"Certificate '{certificate.common_name}' revoked.", "success")
             return redirect(url_for("certificates.detail", cert_id=cert_id))
         except Exception as e:
@@ -106,7 +111,7 @@ def revoke(cert_id):
 
 
 @certificates_bp.route("/<int:cert_id>/download")
-@login_required
+@admin_required
 def download(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
@@ -114,6 +119,10 @@ def download(cert_id):
         return redirect(url_for("certificates.list_certs"))
 
     fmt = request.args.get("format", "pem")
+
+    audit_service.log_action("download_certificate", target_type="certificate", target_id=cert_id,
+                             details={"format": fmt})
+    db.session.commit()
 
     if fmt == "der":
         data = cert_service.export_certificate_der(certificate)
@@ -145,7 +154,7 @@ def download(cert_id):
 
 
 @certificates_bp.route("/<int:cert_id>/download-key")
-@login_required
+@admin_required
 def download_key(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
@@ -155,6 +164,9 @@ def download_key(cert_id):
     if not certificate.private_key_enc:
         flash("No private key available for this certificate.", "danger")
         return redirect(url_for("certificates.detail", cert_id=cert_id))
+
+    audit_service.log_action("download_private_key", target_type="certificate", target_id=cert_id)
+    db.session.commit()
 
     passphrase = current_app.config["MASTER_PASSPHRASE"]
     from ..services.crypto_utils import decrypt_private_key

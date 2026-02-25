@@ -1,6 +1,7 @@
 import os
+import sys
 
-from flask import Flask
+from flask import Flask, session
 
 from .config import Config
 from .extensions import db, login_manager, csrf
@@ -14,12 +15,17 @@ def create_app(config_class=Config):
     login_manager.init_app(app)
     csrf.init_app(app)
 
+    _check_security(app)
+    _configure_session(app)
+    _setup_rate_limiting(app)
+
     from .routes.auth import auth_bp
     from .routes.dashboard import dashboard_bp
     from .routes.ca import ca_bp
     from .routes.certificates import certificates_bp
     from .routes.csr import csr_bp
     from .routes.public import public_bp
+    from .routes.users import users_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -27,20 +33,101 @@ def create_app(config_class=Config):
     app.register_blueprint(certificates_bp)
     app.register_blueprint(csr_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(users_bp)
 
     with app.app_context():
         from . import models  # noqa: F401
         db.create_all()
+        _migrate_schema()
         _create_default_admin(app)
 
     return app
+
+
+def _check_security(app):
+    """Reject insecure defaults in production."""
+    if app.config.get("TESTING") or app.debug:
+        return
+
+    insecure_secret = Config._INSECURE_SECRET_KEY
+    insecure_passphrase = Config._INSECURE_PASSPHRASE
+
+    if app.config.get("SECRET_KEY") == insecure_secret:
+        print("FATAL: SECRET_KEY is set to the insecure default. "
+              "Set a strong SECRET_KEY environment variable.", file=sys.stderr)
+        sys.exit(1)
+
+    if app.config.get("MASTER_PASSPHRASE") == insecure_passphrase:
+        print("FATAL: MASTER_PASSPHRASE is set to the insecure default. "
+              "Set a strong MASTER_PASSPHRASE environment variable.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _configure_session(app):
+    """Set session cookie security flags."""
+    if not app.debug:
+        app.config["SESSION_COOKIE_SECURE"] = True
+
+    @app.before_request
+    def make_session_permanent():
+        session.permanent = True
+
+
+def _setup_rate_limiting(app):
+    """Set up optional rate limiting if Flask-Limiter is installed and enabled."""
+    if not app.config.get("RATE_LIMIT_ENABLED"):
+        app.limiter = None
+        return
+
+    try:
+        from flask_limiter import Limiter
+        from flask_limiter.util import get_remote_address
+        limiter = Limiter(
+            app=app,
+            key_func=get_remote_address,
+            default_limits=[app.config.get("RATE_LIMIT_DEFAULT", "60/minute")],
+            storage_uri="memory://",
+        )
+        app.limiter = limiter
+    except ImportError:
+        print("WARNING: RATE_LIMIT_ENABLED is true but Flask-Limiter is not installed. "
+              "Install it with: pip install Flask-Limiter", file=sys.stderr)
+        app.limiter = None
+
+
+def _migrate_schema():
+    """Add new columns to existing SQLite tables (ALTER TABLE)."""
+    from sqlalchemy import inspect, text
+    inspector = inspect(db.engine)
+
+    # Migrate users table
+    if "users" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("users")}
+        if "role" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'"
+            ))
+        if "is_active_user" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE users ADD COLUMN is_active_user BOOLEAN NOT NULL DEFAULT 1"
+            ))
+
+    # Migrate certificate_signing_requests table
+    if "certificate_signing_requests" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("certificate_signing_requests")}
+        if "created_by" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_signing_requests ADD COLUMN created_by INTEGER REFERENCES users(id)"
+            ))
+
+    db.session.commit()
 
 
 def _create_default_admin(app):
     from .models.user import User
 
     if User.query.count() == 0:
-        admin = User(username=app.config["ADMIN_USERNAME"])
+        admin = User(username=app.config["ADMIN_USERNAME"], role="admin")
         admin.set_password(app.config["ADMIN_PASSWORD"])
         db.session.add(admin)
         db.session.commit()

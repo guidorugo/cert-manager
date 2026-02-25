@@ -14,9 +14,11 @@ class CertificateSigningRequest(db.Model):
     ca_id = db.Column(db.Integer, db.ForeignKey("certificate_authorities.id"), nullable=True)
     certificate_id = db.Column(db.Integer, db.ForeignKey("certificates.id"), nullable=True)
     san_json = db.Column(db.Text, nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     certificate = db.relationship("Certificate", backref="csr")
+    creator = db.relationship("User", backref="csrs", foreign_keys=[created_by])
 
     def __repr__(self):
         return f"<CSR {self.common_name} ({self.status})>"

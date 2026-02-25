@@ -1,9 +1,9 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
-from flask_login import login_required
 
+from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
-from ..services import ca_service, crl_service
+from ..services import ca_service, crl_service, audit_service
 
 ca_bp = Blueprint("ca", __name__, url_prefix="/ca")
 
@@ -22,14 +22,14 @@ def _get_pem_input(req, textarea_field, file_field):
 
 
 @ca_bp.route("/")
-@login_required
+@admin_required
 def list_cas():
     cas = CertificateAuthority.query.order_by(CertificateAuthority.created_at.desc()).all()
     return render_template("ca/list.html", cas=cas)
 
 
 @ca_bp.route("/create", methods=["GET", "POST"])
-@login_required
+@admin_required
 def create():
     if request.method == "POST":
         mode = request.form.get("mode", "generate")
@@ -65,6 +65,8 @@ def create():
             try:
                 ca = ca_service.import_ca(name, cert_pem, key_pem, passphrase,
                                           parent_id=parent_id)
+                audit_service.log_action("import_ca", target_type="ca", target_id=ca.id)
+                db.session.commit()
                 flash(f"CA '{ca.name}' imported successfully.", "success")
                 return redirect(url_for("ca.detail", ca_id=ca.id))
             except ValueError as e:
@@ -116,6 +118,8 @@ def create():
                         name, subject_attrs, key_type, key_size,
                         validity_days, passphrase, path_length=path_length,
                     )
+                audit_service.log_action("create_ca", target_type="ca", target_id=ca.id)
+                db.session.commit()
                 flash(f"CA '{ca.name}' created successfully.", "success")
                 return redirect(url_for("ca.detail", ca_id=ca.id))
             except Exception as e:
@@ -126,7 +130,7 @@ def create():
 
 
 @ca_bp.route("/detect-parent", methods=["POST"])
-@login_required
+@admin_required
 def detect_parent():
     cert_pem = request.form.get("cert_pem", "").strip()
     if not cert_pem:
@@ -137,7 +141,7 @@ def detect_parent():
 
 
 @ca_bp.route("/<int:ca_id>")
-@login_required
+@admin_required
 def detail(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
@@ -148,7 +152,7 @@ def detail(ca_id):
 
 
 @ca_bp.route("/<int:ca_id>/crl", methods=["POST"])
-@login_required
+@admin_required
 def generate_crl(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
@@ -158,6 +162,8 @@ def generate_crl(ca_id):
     passphrase = current_app.config["MASTER_PASSPHRASE"]
     try:
         crl_service.generate_crl(ca, passphrase)
+        audit_service.log_action("generate_crl", target_type="ca", target_id=ca.id)
+        db.session.commit()
         flash(f"CRL #{ca.crl_number} generated successfully.", "success")
     except Exception as e:
         flash(f"Error generating CRL: {e}", "danger")
