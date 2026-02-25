@@ -10,3 +10,23 @@ pre {
 .card {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
+
+.field-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: #6c757d;
+    color: #fff;
+    font-size: 11px;
+    font-weight: bold;
+    margin-left: 6px;
+    cursor: help;
+    vertical-align: middle;
+    line-height: 1;
+}
+.field-info:hover {
+    background-color: #495057;
+}
