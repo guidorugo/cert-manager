@@ -14,7 +14,9 @@
             <th>CA</th>
             <th>Certificate</th>
             <th>Created</th>
+            {% if current_user.is_admin %}
             <th>Actions</th>
+            {% endif %}
         </tr>
     </thead>
     <tbody>
@@ -37,6 +39,7 @@
                 {% else %}-{% endif %}
             </td>
             <td>{{ csr.created_at.strftime('%Y-%m-%d') }}</td>
+            {% if current_user.is_admin %}
             <td>
                 {% if csr.status == 'pending' %}
                 <a href="{{ url_for('csr.sign', csr_id=csr.id) }}" class="btn btn-sm btn-outline-success">Sign</a>
@@ -46,9 +49,10 @@
                 </form>
                 {% endif %}
             </td>
+            {% endif %}
         </tr>
     {% else %}
-        <tr><td colspan="6" class="text-muted text-center">No CSRs found.</td></tr>
+        <tr><td colspan="{{ 6 if current_user.is_admin else 5 }}" class="text-muted text-center">No CSRs found.</td></tr>
     {% endfor %}
     </tbody>
 </table>
