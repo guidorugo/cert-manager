@@ -20,27 +20,39 @@
             <div class="row">
                 <div class="col-md-6">
                     <div class="mb-3">
-                        <label for="cn" class="form-label">Common Name (CN)</label>
+                        <label for="cn" class="form-label">Common Name (CN)
+                            <span class="field-info" data-bs-toggle="tooltip" title="The primary domain name or identifier for this CSR (e.g. example.com).">!</span>
+                        </label>
                         <input type="text" class="form-control" id="cn" name="cn" required placeholder="example.com">
                     </div>
                     <div class="mb-3">
-                        <label for="org" class="form-label">Organization (O)</label>
+                        <label for="org" class="form-label">Organization (O)
+                            <span class="field-info" data-bs-toggle="tooltip" title="The legal organization name requesting the certificate.">!</span>
+                        </label>
                         <input type="text" class="form-control" id="org" name="org">
                     </div>
                     <div class="mb-3">
-                        <label for="ou" class="form-label">Organizational Unit (OU)</label>
+                        <label for="ou" class="form-label">Organizational Unit (OU)
+                            <span class="field-info" data-bs-toggle="tooltip" title="Department or division within the organization (optional).">!</span>
+                        </label>
                         <input type="text" class="form-control" id="ou" name="ou">
                     </div>
                     <div class="mb-3">
-                        <label for="country" class="form-label">Country (C)</label>
+                        <label for="country" class="form-label">Country (C)
+                            <span class="field-info" data-bs-toggle="tooltip" title="Two-letter ISO 3166-1 country code (e.g. US, DE, GB).">!</span>
+                        </label>
                         <input type="text" class="form-control" id="country" name="country" maxlength="2">
                     </div>
                     <div class="mb-3">
-                        <label for="state" class="form-label">State (ST)</label>
+                        <label for="state" class="form-label">State (ST)
+                            <span class="field-info" data-bs-toggle="tooltip" title="State or province name (optional).">!</span>
+                        </label>
                         <input type="text" class="form-control" id="state" name="state">
                     </div>
                     <div class="mb-3">
-                        <label for="locality" class="form-label">Locality (L)</label>
+                        <label for="locality" class="form-label">Locality (L)
+                            <span class="field-info" data-bs-toggle="tooltip" title="City or locality name (optional).">!</span>
+                        </label>
                         <input type="text" class="form-control" id="locality" name="locality">
                     </div>
                 </div>
@@ -48,7 +60,9 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="key_type" class="form-label">Key Type</label>
+                                <label for="key_type" class="form-label">Key Type
+                                    <span class="field-info" data-bs-toggle="tooltip" title="RSA is widely compatible. EC (Elliptic Curve) offers smaller keys with equivalent security.">!</span>
+                                </label>
                                 <select class="form-select" id="key_type" name="key_type" onchange="updateKeySizes()">
                                     <option value="RSA">RSA</option>
                                     <option value="EC">EC</option>
@@ -57,7 +71,9 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="key_size" class="form-label">Key Size</label>
+                                <label for="key_size" class="form-label">Key Size
+                                    <span class="field-info" data-bs-toggle="tooltip" title="For RSA: 2048 or 4096 bits. For EC: 256 or 384 bits (curve size).">!</span>
+                                </label>
                                 <select class="form-select" id="key_size" name="key_size">
                                     <option value="2048">2048</option>
                                     <option value="4096">4096</option>
@@ -66,7 +82,9 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label for="san" class="form-label">Subject Alternative Names</label>
+                        <label for="san" class="form-label">Subject Alternative Names
+                            <span class="field-info" data-bs-toggle="tooltip" title="Additional domains, IPs, or emails. One per line. Prefix with IP: or EMAIL: as needed.">!</span>
+                        </label>
                         <textarea class="form-control" id="san" name="san" rows="4" placeholder="One per line:&#10;example.com&#10;*.example.com&#10;IP:192.168.1.1"></textarea>
                     </div>
                 </div>
@@ -81,7 +99,9 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="mode" value="upload">
             <div class="mb-3">
-                <label for="csr_pem" class="form-label">Paste CSR (PEM)</label>
+                <label for="csr_pem" class="form-label">Paste CSR (PEM)
+                    <span class="field-info" data-bs-toggle="tooltip" title="Paste a Certificate Signing Request in PEM format (begins with -----BEGIN CERTIFICATE REQUEST-----).">!</span>
+                </label>
                 <textarea class="form-control font-monospace" id="csr_pem" name="csr_pem" rows="12"
                     placeholder="-----BEGIN CERTIFICATE REQUEST-----&#10;...&#10;-----END CERTIFICATE REQUEST-----"></textarea>
             </div>

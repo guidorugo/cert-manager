@@ -3,107 +3,225 @@
 {% block content %}
 <h2>Create Certificate Authority</h2>
 
-<form method="POST" class="mt-3">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<ul class="nav nav-tabs mt-3" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#generate" type="button">Generate CA</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#upload" type="button">Upload CA</button>
+    </li>
+</ul>
 
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card mb-3">
-                <div class="card-header">CA Settings</div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label for="name" class="form-label">CA Name</label>
-                        <input type="text" class="form-control" id="name" name="name" required placeholder="My Root CA">
-                    </div>
-                    <div class="mb-3">
-                        <label for="ca_type" class="form-label">CA Type</label>
-                        <select class="form-select" id="ca_type" name="ca_type" onchange="toggleParent()">
-                            <option value="root">Root CA</option>
-                            <option value="intermediate">Intermediate CA</option>
-                        </select>
-                    </div>
-                    <div class="mb-3" id="parent_div" style="display:none">
-                        <label for="parent_id" class="form-label">Parent CA</label>
-                        <select class="form-select" id="parent_id" name="parent_id">
-                            <option value="">-- Select Parent CA --</option>
-                            {% for ca in cas %}
-                            <option value="{{ ca.id }}">{{ ca.name }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
+<div class="tab-content mt-3">
+    <!-- Generate Tab -->
+    <div class="tab-pane fade show active" id="generate">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="mode" value="generate">
+
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header">CA Settings</div>
+                        <div class="card-body">
                             <div class="mb-3">
-                                <label for="key_type" class="form-label">Key Type</label>
-                                <select class="form-select" id="key_type" name="key_type" onchange="updateKeySizes()">
-                                    <option value="RSA">RSA</option>
-                                    <option value="EC">EC</option>
+                                <label for="name" class="form-label">CA Name
+                                    <span class="field-info" data-bs-toggle="tooltip" title="A unique, human-readable name to identify this CA in the system.">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="name" name="name" required placeholder="My Root CA">
+                            </div>
+                            <div class="mb-3">
+                                <label for="ca_type" class="form-label">CA Type
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Root CA is self-signed. Intermediate CA is signed by a parent CA.">!</span>
+                                </label>
+                                <select class="form-select" id="ca_type" name="ca_type" onchange="toggleParent()">
+                                    <option value="root">Root CA</option>
+                                    <option value="intermediate">Intermediate CA</option>
                                 </select>
                             </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="key_size" class="form-label">Key Size</label>
-                                <select class="form-select" id="key_size" name="key_size">
-                                    <option value="2048">2048</option>
-                                    <option value="4096">4096</option>
+                            <div class="mb-3" id="parent_div" style="display:none">
+                                <label for="parent_id" class="form-label">Parent CA
+                                    <span class="field-info" data-bs-toggle="tooltip" title="The parent CA that will sign this intermediate CA's certificate.">!</span>
+                                </label>
+                                <select class="form-select" id="parent_id" name="parent_id">
+                                    <option value="">-- Select Parent CA --</option>
+                                    {% for ca in cas %}
+                                    <option value="{{ ca.id }}">{{ ca.name }}</option>
+                                    {% endfor %}
                                 </select>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="key_type" class="form-label">Key Type
+                                            <span class="field-info" data-bs-toggle="tooltip" title="RSA is widely compatible. EC (Elliptic Curve) offers smaller keys with equivalent security.">!</span>
+                                        </label>
+                                        <select class="form-select" id="key_type" name="key_type" onchange="updateKeySizes()">
+                                            <option value="RSA">RSA</option>
+                                            <option value="EC">EC</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="key_size" class="form-label">Key Size
+                                            <span class="field-info" data-bs-toggle="tooltip" title="For RSA: 2048 or 4096 bits. For EC: 256 or 384 bits (curve size).">!</span>
+                                        </label>
+                                        <select class="form-select" id="key_size" name="key_size">
+                                            <option value="2048">2048</option>
+                                            <option value="4096">4096</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="validity_days" class="form-label">Validity (days)
+                                            <span class="field-info" data-bs-toggle="tooltip" title="Number of days this CA certificate will be valid. Typical root CAs use 3650 (10 years).">!</span>
+                                        </label>
+                                        <input type="number" class="form-control" id="validity_days" name="validity_days" value="3650">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="path_length" class="form-label">Path Length
+                                            <span class="field-info" data-bs-toggle="tooltip" title="Maximum number of intermediate CAs allowed below this one. Leave blank for unlimited.">!</span>
+                                        </label>
+                                        <input type="number" class="form-control" id="path_length" name="path_length" placeholder="Unlimited">
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
+                </div>
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header">Subject</div>
+                        <div class="card-body">
                             <div class="mb-3">
-                                <label for="validity_days" class="form-label">Validity (days)</label>
-                                <input type="number" class="form-control" id="validity_days" name="validity_days" value="3650">
+                                <label for="cn" class="form-label">Common Name (CN)
+                                    <span class="field-info" data-bs-toggle="tooltip" title="The primary name for this CA, typically its descriptive name.">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="cn" name="cn" required placeholder="My Root CA">
                             </div>
-                        </div>
-                        <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="path_length" class="form-label">Path Length</label>
-                                <input type="number" class="form-control" id="path_length" name="path_length" placeholder="Unlimited">
+                                <label for="org" class="form-label">Organization (O)
+                                    <span class="field-info" data-bs-toggle="tooltip" title="The legal organization name that owns this CA.">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="org" name="org">
+                            </div>
+                            <div class="mb-3">
+                                <label for="ou" class="form-label">Organizational Unit (OU)
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Department or division within the organization (optional).">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="ou" name="ou">
+                            </div>
+                            <div class="mb-3">
+                                <label for="country" class="form-label">Country (C)
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Two-letter ISO 3166-1 country code (e.g. US, DE, GB).">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="country" name="country" maxlength="2" placeholder="US">
+                            </div>
+                            <div class="mb-3">
+                                <label for="state" class="form-label">State (ST)
+                                    <span class="field-info" data-bs-toggle="tooltip" title="State or province name (optional).">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="state" name="state">
+                            </div>
+                            <div class="mb-3">
+                                <label for="locality" class="form-label">Locality (L)
+                                    <span class="field-info" data-bs-toggle="tooltip" title="City or locality name (optional).">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="locality" name="locality">
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card mb-3">
-                <div class="card-header">Subject</div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label for="cn" class="form-label">Common Name (CN)</label>
-                        <input type="text" class="form-control" id="cn" name="cn" required placeholder="My Root CA">
-                    </div>
-                    <div class="mb-3">
-                        <label for="org" class="form-label">Organization (O)</label>
-                        <input type="text" class="form-control" id="org" name="org">
-                    </div>
-                    <div class="mb-3">
-                        <label for="ou" class="form-label">Organizational Unit (OU)</label>
-                        <input type="text" class="form-control" id="ou" name="ou">
-                    </div>
-                    <div class="mb-3">
-                        <label for="country" class="form-label">Country (C)</label>
-                        <input type="text" class="form-control" id="country" name="country" maxlength="2" placeholder="US">
-                    </div>
-                    <div class="mb-3">
-                        <label for="state" class="form-label">State (ST)</label>
-                        <input type="text" class="form-control" id="state" name="state">
-                    </div>
-                    <div class="mb-3">
-                        <label for="locality" class="form-label">Locality (L)</label>
-                        <input type="text" class="form-control" id="locality" name="locality">
-                    </div>
-                </div>
-            </div>
-        </div>
+
+            <button type="submit" class="btn btn-primary">Create CA</button>
+            <a href="{{ url_for('ca.list_cas') }}" class="btn btn-secondary">Cancel</a>
+        </form>
     </div>
 
-    <button type="submit" class="btn btn-primary">Create CA</button>
-    <a href="{{ url_for('ca.list_cas') }}" class="btn btn-secondary">Cancel</a>
-</form>
+    <!-- Upload Tab -->
+    <div class="tab-pane fade" id="upload">
+        <form method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="mode" value="upload">
+
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header">CA Identity</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="upload_name" class="form-label">CA Name
+                                    <span class="field-info" data-bs-toggle="tooltip" title="A unique, human-readable name to identify this imported CA.">!</span>
+                                </label>
+                                <input type="text" class="form-control" id="upload_name" name="name" required placeholder="My Imported CA">
+                            </div>
+                            <div class="mb-3">
+                                <label for="upload_parent_id" class="form-label">Parent CA
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Select the parent if this is an intermediate CA. Auto-detected when certificate is provided.">!</span>
+                                </label>
+                                <select class="form-select" id="upload_parent_id" name="upload_parent_id">
+                                    <option value="">None (Root CA)</option>
+                                    {% for ca in cas %}
+                                    <option value="{{ ca.id }}">{{ ca.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <div id="parent_detect_status" class="form-text"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header">Certificate</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="cert_pem" class="form-label">Certificate PEM
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Paste the CA certificate in PEM format (begins with -----BEGIN CERTIFICATE-----).">!</span>
+                                </label>
+                                <textarea class="form-control font-monospace" id="cert_pem" name="cert_pem" rows="8"
+                                    placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label for="cert_file" class="form-label">Upload cert file
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Upload a .pem, .crt, or .cer file containing the CA certificate.">!</span>
+                                </label>
+                                <input type="file" class="form-control" id="cert_file" name="cert_file" accept=".pem,.crt,.cer">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card mb-3">
+                        <div class="card-header">Private Key</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="key_pem" class="form-label">Private Key PEM
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Paste the unencrypted private key in PEM format (begins with -----BEGIN PRIVATE KEY-----).">!</span>
+                                </label>
+                                <textarea class="form-control font-monospace" id="key_pem" name="key_pem" rows="8"
+                                    placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label for="key_file" class="form-label">Upload key file
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Upload a .pem or .key file containing the unencrypted private key.">!</span>
+                                </label>
+                                <input type="file" class="form-control" id="key_file" name="key_file" accept=".pem,.key">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Import CA</button>
+            <a href="{{ url_for('ca.list_cas') }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -123,6 +241,78 @@ function updateKeySizes() {
         keySizeSelect.add(new Option('256', '256'));
         keySizeSelect.add(new Option('384', '384'));
     }
+}
+
+// File-to-textarea loaders
+document.getElementById('cert_file').addEventListener('change', function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+        document.getElementById('cert_pem').value = ev.target.result.trim();
+        detectParent();
+    };
+    reader.readAsText(file);
+});
+
+document.getElementById('key_file').addEventListener('change', function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+        document.getElementById('key_pem').value = ev.target.result.trim();
+    };
+    reader.readAsText(file);
+});
+
+// Parent auto-detect with debounce
+var detectTimeout = null;
+document.getElementById('cert_pem').addEventListener('input', function() {
+    clearTimeout(detectTimeout);
+    detectTimeout = setTimeout(detectParent, 800);
+});
+
+function detectParent() {
+    var certPem = document.getElementById('cert_pem').value.trim();
+    var statusEl = document.getElementById('parent_detect_status');
+    var parentSelect = document.getElementById('upload_parent_id');
+
+    if (!certPem) {
+        statusEl.textContent = '';
+        return;
+    }
+
+    var csrfToken = document.querySelector('input[name="csrf_token"]').value;
+    var formData = new FormData();
+    formData.append('cert_pem', certPem);
+    formData.append('csrf_token', csrfToken);
+
+    fetch('{{ url_for("ca.detect_parent") }}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (data.is_self_signed === true) {
+            parentSelect.value = '';
+            statusEl.textContent = 'Self-signed certificate detected (root CA).';
+            statusEl.className = 'form-text text-success';
+        } else if (data.is_self_signed === false && data.parent_id) {
+            parentSelect.value = data.parent_id;
+            statusEl.textContent = 'Parent CA auto-detected. You may override.';
+            statusEl.className = 'form-text text-primary';
+        } else if (data.is_self_signed === false) {
+            statusEl.textContent = 'Issuer not found among existing CAs. Select manually or leave blank.';
+            statusEl.className = 'form-text text-warning';
+        } else {
+            statusEl.textContent = '';
+            statusEl.className = 'form-text';
+        }
+    })
+    .catch(function() {
+        statusEl.textContent = '';
+        statusEl.className = 'form-text';
+    });
 }
 </script>
 {% endblock %}
