@@ -210,7 +210,7 @@ python -m pytest tests/ -v
 | `ADMIN_USERNAME` | `admin` | Default admin username |
 | `ADMIN_PASSWORD` | `admin` | Default admin password |
 | `SERVER_NAME_FOR_OCSP` | `localhost:5000` | Server hostname for OCSP AIA URLs |
-| `SESSION_COOKIE_SECURE` | `true` | Require HTTPS for session cookies (set to `false` for HTTP) |
+| `SESSION_COOKIE_SECURE` | `false` | Require HTTPS for session cookies (set to `true` behind a TLS proxy) |
 | `SESSION_LIFETIME_MINUTES` | `30` | Session timeout in minutes |
 | `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting (requires Flask-Limiter) |
 | `RATE_LIMIT_DEFAULT` | `60/minute` | Default rate limit when enabled |
