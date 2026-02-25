@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Revoke {{ cert.common_name }} - Cert Manager{% endblock %}
+{% block content %}
+<h2>Revoke Certificate</h2>
+
+<div class="card mt-3">
+    <div class="card-body">
+        <p>Are you sure you want to revoke the certificate <strong>{{ cert.common_name }}</strong>?</p>
+        <p>Serial: <code>{{ cert.serial_number }}</code></p>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label for="reason" class="form-label">Revocation Reason</label>
+                <select class="form-select" id="reason" name="reason">
+                    <option value="unspecified">Unspecified</option>
+                    <option value="key_compromise">Key Compromise</option>
+                    <option value="ca_compromise">CA Compromise</option>
+                    <option value="affiliation_changed">Affiliation Changed</option>
+                    <option value="superseded">Superseded</option>
+                    <option value="cessation_of_operation">Cessation of Operation</option>
+                    <option value="certificate_hold">Certificate Hold</option>
+                    <option value="privilege_withdrawn">Privilege Withdrawn</option>
+                    <option value="aa_compromise">AA Compromise</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-danger">Revoke Certificate</button>
+            <a href="{{ url_for('certificates.detail', cert_id=cert.id) }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

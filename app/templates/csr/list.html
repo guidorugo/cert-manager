@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}CSRs - Cert Manager{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center">
+    <h2>Certificate Signing Requests</h2>
+    <a href="{{ url_for('csr.create') }}" class="btn btn-primary">Create CSR</a>
+</div>
+
+<table class="table mt-3">
+    <thead>
+        <tr>
+            <th>Common Name</th>
+            <th>Status</th>
+            <th>CA</th>
+            <th>Certificate</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for csr in csrs %}
+        <tr>
+            <td><a href="{{ url_for('csr.detail', csr_id=csr.id) }}">{{ csr.common_name }}</a></td>
+            <td>
+                {% if csr.status == 'pending' %}
+                <span class="badge bg-warning text-dark">Pending</span>
+                {% elif csr.status == 'approved' %}
+                <span class="badge bg-success">Approved</span>
+                {% else %}
+                <span class="badge bg-secondary">Rejected</span>
+                {% endif %}
+            </td>
+            <td>{{ csr.ca.name if csr.ca else '-' }}</td>
+            <td>
+                {% if csr.certificate %}
+                <a href="{{ url_for('certificates.detail', cert_id=csr.certificate.id) }}">View</a>
+                {% else %}-{% endif %}
+            </td>
+            <td>{{ csr.created_at.strftime('%Y-%m-%d') }}</td>
+            <td>
+                {% if csr.status == 'pending' %}
+                <a href="{{ url_for('csr.sign', csr_id=csr.id) }}" class="btn btn-sm btn-outline-success">Sign</a>
+                <form method="POST" action="{{ url_for('csr.reject', csr_id=csr.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+    {% else %}
+        <tr><td colspan="6" class="text-muted text-center">No CSRs found.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
