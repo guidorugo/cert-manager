@@ -4,12 +4,13 @@ from flask import (
     Blueprint, render_template, redirect, url_for, flash,
     request, current_app, Response,
 )
-from flask_login import login_required
+from flask_login import login_required, current_user
 
+from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.csr import CertificateSigningRequest
-from ..services import csr_service, cert_service
+from ..services import csr_service, cert_service, audit_service
 
 csr_bp = Blueprint("csr", __name__, url_prefix="/csr")
 
@@ -17,9 +18,14 @@ csr_bp = Blueprint("csr", __name__, url_prefix="/csr")
 @csr_bp.route("/")
 @login_required
 def list_csrs():
-    csrs = CertificateSigningRequest.query.order_by(
-        CertificateSigningRequest.created_at.desc()
-    ).all()
+    if current_user.is_admin:
+        csrs = CertificateSigningRequest.query.order_by(
+            CertificateSigningRequest.created_at.desc()
+        ).all()
+    else:
+        csrs = CertificateSigningRequest.query.filter_by(
+            created_by=current_user.id
+        ).order_by(CertificateSigningRequest.created_at.desc()).all()
     return render_template("csr/list.html", csrs=csrs)
 
 
@@ -35,7 +41,9 @@ def create():
                 flash("CSR PEM data is required.", "danger")
                 return render_template("csr/create.html")
             try:
-                csr_model = csr_service.import_csr(csr_pem)
+                csr_model = csr_service.import_csr(csr_pem, created_by=current_user.id)
+                audit_service.log_action("import_csr", target_type="csr", target_id=csr_model.id)
+                db.session.commit()
                 flash(f"CSR for '{csr_model.common_name}' imported.", "success")
                 return redirect(url_for("csr.detail", csr_id=csr_model.id))
             except Exception as e:
@@ -65,7 +73,10 @@ def create():
             try:
                 csr_model, key_pem, _ = csr_service.create_csr(
                     subject_attrs, san_list, key_type, key_size, passphrase,
+                    created_by=current_user.id,
                 )
+                audit_service.log_action("create_csr", target_type="csr", target_id=csr_model.id)
+                db.session.commit()
                 flash(
                     f"CSR for '{csr_model.common_name}' created. "
                     "Download the private key now - it won't be stored.",
@@ -89,12 +100,16 @@ def detail(csr_id):
         flash("CSR not found.", "danger")
         return redirect(url_for("csr.list_csrs"))
 
+    if not current_user.is_admin and csr_model.created_by != current_user.id:
+        flash("You do not have permission to view this CSR.", "danger")
+        return redirect(url_for("csr.list_csrs"))
+
     san_list = json.loads(csr_model.san_json) if csr_model.san_json else []
     return render_template("csr/detail.html", csr=csr_model, san_list=san_list)
 
 
 @csr_bp.route("/<int:csr_id>/sign", methods=["GET", "POST"])
-@login_required
+@admin_required
 def sign(csr_id):
     csr_model = db.session.get(CertificateSigningRequest, csr_id)
     if not csr_model:
@@ -124,6 +139,9 @@ def sign(csr_id):
             certificate = cert_service.sign_csr(
                 csr_model, ca, validity_days, passphrase, ocsp_url=ocsp_url,
             )
+            audit_service.log_action("sign_csr", target_type="csr", target_id=csr_id,
+                                     details={"certificate_id": certificate.id})
+            db.session.commit()
             flash(f"Certificate '{certificate.common_name}' issued.", "success")
             return redirect(url_for("certificates.detail", cert_id=certificate.id))
         except Exception as e:
@@ -134,7 +152,7 @@ def sign(csr_id):
 
 
 @csr_bp.route("/<int:csr_id>/reject", methods=["POST"])
-@login_required
+@admin_required
 def reject(csr_id):
     csr_model = db.session.get(CertificateSigningRequest, csr_id)
     if not csr_model:
@@ -142,6 +160,7 @@ def reject(csr_id):
         return redirect(url_for("csr.list_csrs"))
 
     csr_model.status = "rejected"
+    audit_service.log_action("reject_csr", target_type="csr", target_id=csr_id)
     db.session.commit()
     flash(f"CSR for '{csr_model.common_name}' rejected.", "info")
     return redirect(url_for("csr.list_csrs"))
