@@ -6,8 +6,8 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - SECRET_KEY=${SECRET_KEY:-change-me-to-a-random-secret-key}
-      - MASTER_PASSPHRASE=${MASTER_PASSPHRASE:-change-me-to-a-strong-passphrase}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set}
+      - MASTER_PASSPHRASE=${MASTER_PASSPHRASE:?MASTER_PASSPHRASE must be set}
       - DATABASE_URL=sqlite:////app/data/cert-manager.db
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
