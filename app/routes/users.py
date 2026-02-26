@@ -29,7 +29,7 @@ def create_user():
             flash("Username and password are required.", "danger")
             return render_template("users/create.html")
 
-        if role not in ("admin", "csr_user"):
+        if role not in ("admin", "csr_user", "csr_requester"):
             flash("Invalid role.", "danger")
             return render_template("users/create.html")
 
@@ -60,7 +60,7 @@ def edit_user(user_id):
 
     if request.method == "POST":
         new_role = request.form.get("role", user.role)
-        if new_role not in ("admin", "csr_user"):
+        if new_role not in ("admin", "csr_user", "csr_requester"):
             flash("Invalid role.", "danger")
             return render_template("users/edit.html", user=user)
 

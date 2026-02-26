@@ -14,6 +14,7 @@
             <div class="mb-3">
                 <label for="role" class="form-label">Role</label>
                 <select class="form-select" id="role" name="role">
+                    <option value="csr_requester" {{ 'selected' if user.role == 'csr_requester' }}>CSR Requester</option>
                     <option value="csr_user" {{ 'selected' if user.role == 'csr_user' }}>CSR User</option>
                     <option value="admin" {{ 'selected' if user.role == 'admin' }}>Admin</option>
                 </select>
