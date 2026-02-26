@@ -12,6 +12,7 @@
             <th>Name</th>
             <th>Common Name</th>
             <th>Type</th>
+            <th>Status</th>
             <th>Key</th>
             <th>Valid Until</th>
             <th>Issued Certs</th>
@@ -24,15 +25,25 @@
             <td><a href="{{ url_for('ca.detail', ca_id=ca.id) }}">{{ ca.name }}</a></td>
             <td>{{ ca.common_name }}</td>
             <td>{{ "Root" if ca.is_root else "Intermediate" }}</td>
+            <td>
+                {% if ca.is_revoked %}
+                <span class="badge bg-danger">Revoked</span>
+                {% else %}
+                <span class="badge bg-success">Active</span>
+                {% endif %}
+            </td>
             <td>{{ ca.key_type }} {{ ca.key_size }}</td>
             <td>{{ ca.not_after.strftime('%Y-%m-%d') }}</td>
             <td>{{ ca.certificates.count() }}</td>
             <td>
                 <a href="{{ url_for('ca.detail', ca_id=ca.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+                {% if not ca.is_revoked %}
+                <a href="{{ url_for('ca.revoke', ca_id=ca.id) }}" class="btn btn-sm btn-outline-danger">Revoke</a>
+                {% endif %}
             </td>
         </tr>
     {% else %}
-        <tr><td colspan="7" class="text-muted text-center">No CAs found.</td></tr>
+        <tr><td colspan="8" class="text-muted text-center">No CAs found.</td></tr>
     {% endfor %}
     </tbody>
 </table>

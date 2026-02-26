@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Revoke {{ ca.name }} - Cert Manager{% endblock %}
+{% block content %}
+<h2>Revoke Certificate Authority</h2>
+
+<div class="card mt-3">
+    <div class="card-body">
+        <p>Are you sure you want to revoke the CA <strong>{{ ca.name }}</strong>?</p>
+        <p>Type: {{ "Root CA" if ca.is_root else "Intermediate CA" }}</p>
+        <p>Serial: <code>{{ ca.serial_number }}</code></p>
+
+        {% if cert_count > 0 or sub_ca_count > 0 %}
+        <div class="alert alert-warning">
+            <strong>Warning:</strong> This action will cascade and also revoke:
+            <ul class="mb-0 mt-1">
+                {% if cert_count > 0 %}
+                <li>{{ cert_count }} active certificate(s) issued by this CA</li>
+                {% endif %}
+                {% if sub_ca_count > 0 %}
+                <li>{{ sub_ca_count }} sub-CA(s) and all their issued certificates</li>
+                {% endif %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label for="reason" class="form-label">Revocation Reason</label>
+                <select class="form-select" id="reason" name="reason">
+                    <option value="unspecified">Unspecified</option>
+                    <option value="key_compromise">Key Compromise</option>
+                    <option value="ca_compromise">CA Compromise</option>
+                    <option value="affiliation_changed">Affiliation Changed</option>
+                    <option value="superseded">Superseded</option>
+                    <option value="cessation_of_operation">Cessation of Operation</option>
+                    <option value="certificate_hold">Certificate Hold</option>
+                    <option value="privilege_withdrawn">Privilege Withdrawn</option>
+                    <option value="aa_compromise">AA Compromise</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-danger">Revoke CA</button>
+            <a href="{{ url_for('ca.detail', ca_id=ca.id) }}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

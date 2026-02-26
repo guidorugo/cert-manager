@@ -5,6 +5,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import CRLEntryExtensionOID
 
 from ..extensions import db
+from ..models.ca import CertificateAuthority
 from ..models.certificate import Certificate
 from .crypto_utils import decrypt_private_key
 
@@ -34,6 +35,43 @@ def revoke_certificate(cert_id, reason="unspecified"):
     certificate.revocation_reason = reason
     db.session.commit()
     return certificate
+
+
+def revoke_ca(ca_id, reason="unspecified"):
+    ca = db.session.get(CertificateAuthority, ca_id)
+    if not ca:
+        raise ValueError("CA not found")
+    if ca.is_revoked:
+        raise ValueError("CA is already revoked")
+
+    now = datetime.now(timezone.utc)
+    certs_revoked = 0
+    sub_cas_revoked = 0
+
+    def _revoke_ca_recursive(target_ca):
+        nonlocal certs_revoked, sub_cas_revoked
+
+        target_ca.is_revoked = True
+        target_ca.revoked_at = now
+        target_ca.revocation_reason = reason
+
+        # Revoke all non-revoked certificates issued by this CA
+        active_certs = Certificate.query.filter_by(ca_id=target_ca.id, is_revoked=False).all()
+        for cert in active_certs:
+            cert.is_revoked = True
+            cert.revoked_at = now
+            cert.revocation_reason = reason
+            certs_revoked += 1
+
+        # Recursively revoke child CAs
+        for child_ca in target_ca.children:
+            if not child_ca.is_revoked:
+                sub_cas_revoked += 1
+                _revoke_ca_recursive(child_ca)
+
+    _revoke_ca_recursive(ca)
+    db.session.commit()
+    return ca, certs_revoked, sub_cas_revoked
 
 
 def generate_crl(ca, passphrase, validity_days=7):

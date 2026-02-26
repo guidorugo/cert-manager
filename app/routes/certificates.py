@@ -48,6 +48,11 @@ def create():
             return render_template("certificates/create.html",
                                    cas=CertificateAuthority.query.all())
 
+        if ca.is_revoked:
+            flash("Cannot issue certificates from a revoked CA.", "danger")
+            return render_template("certificates/create.html",
+                                   cas=CertificateAuthority.query.all())
+
         subject_attrs = {
             "CN": cn, "O": org, "OU": ou,
             "C": country, "ST": state, "L": locality,

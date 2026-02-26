@@ -14,6 +14,7 @@ def index():
     if current_user.is_admin:
         stats = {
             "ca_count": CertificateAuthority.query.count(),
+            "ca_revoked": CertificateAuthority.query.filter_by(is_revoked=True).count(),
             "cert_count": Certificate.query.count(),
             "cert_active": Certificate.query.filter_by(is_revoked=False).count(),
             "cert_revoked": Certificate.query.filter_by(is_revoked=True).count(),
