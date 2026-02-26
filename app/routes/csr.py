@@ -126,34 +126,62 @@ def sign(csr_id):
         return redirect(url_for("csr.detail", csr_id=csr_id))
 
     if request.method == "POST":
+        ocsp_server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+        ocsp_scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
+
         try:
             ca_id = int(request.form.get("ca_id"))
             validity_days = int(request.form.get("validity_days", "365"))
         except (ValueError, TypeError):
             flash("CA ID and validity days must be valid numbers.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
             flash("CA not found.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         if ca.is_revoked:
             flash("Cannot sign CSR with a revoked CA.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         passphrase = current_app.config["MASTER_PASSPHRASE"]
 
-        server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
-        scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
-        ocsp_url = f"{scheme}://{server}/public/ocsp/{ca_id}"
+        ocsp_url = f"{ocsp_scheme}://{ocsp_server}/public/ocsp/{ca_id}"
+        crl_dp_url = f"{ocsp_scheme}://{ocsp_server}/public/crl/{ca_id}.crl"
+
+        # Parse Key Usage from checkboxes
+        key_usage = {
+            "digital_signature": "ku_digital_signature" in request.form,
+            "key_encipherment": "ku_key_encipherment" in request.form,
+            "content_commitment": "ku_content_commitment" in request.form,
+            "data_encipherment": "ku_data_encipherment" in request.form,
+            "key_agreement": "ku_key_agreement" in request.form,
+        }
+
+        if not any(key_usage.values()):
+            flash("At least one Key Usage must be selected.", "danger")
+            return render_template("csr/sign.html", csr=csr_model,
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+
+        # Parse Extended Key Usage from checkboxes
+        eku_names = ["serverAuth", "clientAuth", "codeSigning",
+                     "emailProtection", "timeStamping", "ocspSigning"]
+        extended_key_usage = [name for name in eku_names
+                              if f"eku_{name}" in request.form]
 
         try:
             certificate = cert_service.sign_csr(
                 csr_model, ca, validity_days, passphrase, ocsp_url=ocsp_url,
+                key_usage=key_usage, extended_key_usage=extended_key_usage or None,
+                crl_dp_url=crl_dp_url,
             )
             audit_service.log_action("sign_csr", target_type="csr", target_id=csr_id,
                                      details={"certificate_id": certificate.id})
@@ -164,7 +192,10 @@ def sign(csr_id):
             flash(f"Error signing CSR: {e}", "danger")
 
     cas = CertificateAuthority.query.all()
-    return render_template("csr/sign.html", csr=csr_model, cas=cas)
+    server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+    scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
+    return render_template("csr/sign.html", csr=csr_model, cas=cas,
+                           ocsp_scheme=scheme, ocsp_server=server)
 
 
 @csr_bp.route("/<int:csr_id>/reject", methods=["POST"])
