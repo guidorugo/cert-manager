@@ -46,6 +46,9 @@ def create():
         locality = request.form.get("locality", "").strip()
         key_type = request.form.get("key_type", "RSA")
 
+        ocsp_server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+        ocsp_scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
+
         try:
             ca_id = int(request.form.get("ca_id"))
             key_size = int(request.form.get("key_size", "2048"))
@@ -53,24 +56,28 @@ def create():
         except (ValueError, TypeError):
             flash("CA ID, key size, and validity days must be valid numbers.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
         san_raw = request.form.get("san", "").strip()
 
         if not cn:
             flash("Common Name is required.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
             flash("CA not found.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         if ca.is_revoked:
             flash("Cannot issue certificates from a revoked CA.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         subject_attrs = {
             "CN": cn, "O": org, "OU": ou,
@@ -79,15 +86,37 @@ def create():
         san_list = [s.strip() for s in san_raw.split("\n") if s.strip()] if san_raw else []
         passphrase = current_app.config["MASTER_PASSPHRASE"]
 
-        # Build OCSP URL
-        server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
-        scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
-        ocsp_url = f"{scheme}://{server}/public/ocsp/{ca_id}"
+        # Build OCSP URL and CRL DP URL
+        ocsp_url = f"{ocsp_scheme}://{ocsp_server}/public/ocsp/{ca_id}"
+        crl_dp_url = f"{ocsp_scheme}://{ocsp_server}/public/crl/{ca_id}.crl"
+
+        # Parse Key Usage from checkboxes
+        key_usage = {
+            "digital_signature": "ku_digital_signature" in request.form,
+            "key_encipherment": "ku_key_encipherment" in request.form,
+            "content_commitment": "ku_content_commitment" in request.form,
+            "data_encipherment": "ku_data_encipherment" in request.form,
+            "key_agreement": "ku_key_agreement" in request.form,
+        }
+
+        if not any(key_usage.values()):
+            flash("At least one Key Usage must be selected.", "danger")
+            cas = CertificateAuthority.query.filter_by(is_revoked=False).all()
+            return render_template("certificates/create.html", cas=cas,
+                                   ocsp_scheme=scheme, ocsp_server=server)
+
+        # Parse Extended Key Usage from checkboxes
+        eku_names = ["serverAuth", "clientAuth", "codeSigning",
+                     "emailProtection", "timeStamping", "ocspSigning"]
+        extended_key_usage = [name for name in eku_names
+                              if f"eku_{name}" in request.form]
 
         try:
             certificate = cert_service.create_certificate(
                 ca, subject_attrs, san_list, validity_days, passphrase,
                 key_type=key_type, key_size=key_size, ocsp_url=ocsp_url,
+                key_usage=key_usage, extended_key_usage=extended_key_usage or None,
+                crl_dp_url=crl_dp_url,
             )
             audit_service.log_action("create_certificate", target_type="certificate", target_id=certificate.id)
             db.session.commit()
@@ -97,7 +126,10 @@ def create():
             flash(f"Error creating certificate: {e}", "danger")
 
     cas = CertificateAuthority.query.all()
-    return render_template("certificates/create.html", cas=cas)
+    server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+    scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
+    return render_template("certificates/create.html", cas=cas,
+                           ocsp_scheme=scheme, ocsp_server=server)
 
 
 @certificates_bp.route("/<int:cert_id>")
