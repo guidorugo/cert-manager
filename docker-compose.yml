@@ -1,6 +1,8 @@
 services:
   app:
     build: .
+    # To use the pre-built image instead of building locally, comment out 'build' and uncomment:
+    # image: ghcr.io/guidorugo/cert-manager:latest
     ports:
       - "5000:5000"
     volumes:

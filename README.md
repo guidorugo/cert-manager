@@ -30,6 +30,25 @@ docker-compose up --build
 
 Navigate to `http://localhost:5000` and log in with the default credentials (admin/admin).
 
+### Pre-built Image (GHCR)
+
+A pre-built image is published to GitHub Container Registry on every push to `master`.
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/guidorugo/cert-manager:latest
+
+# Run with required environment variables
+docker run -d \
+  -p 5000:5000 \
+  -v ./data:/app/data \
+  -e SECRET_KEY=your-secret-key \
+  -e MASTER_PASSPHRASE=your-passphrase \
+  ghcr.io/guidorugo/cert-manager:latest
+```
+
+You can also use the pre-built image with docker-compose by commenting out the `build` line and uncommenting the `image` line in `docker-compose.yml`.
+
 ### Local Development
 
 ```bash
