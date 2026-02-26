@@ -4,6 +4,7 @@ from flask import (
     Blueprint, render_template, redirect, url_for, flash,
     request, current_app, Response,
 )
+from flask_login import login_required, current_user
 
 from ..decorators import admin_required
 from ..extensions import db
@@ -15,9 +16,14 @@ certificates_bp = Blueprint("certificates", __name__, url_prefix="/certificates"
 
 
 @certificates_bp.route("/")
-@admin_required
+@login_required
 def list_certs():
-    certs = Certificate.query.order_by(Certificate.created_at.desc()).all()
+    if current_user.is_admin:
+        certs = Certificate.query.order_by(Certificate.created_at.desc()).all()
+    else:
+        certs = Certificate.query.filter_by(
+            requested_by=current_user.id
+        ).order_by(Certificate.created_at.desc()).all()
     return render_template("certificates/list.html", certs=certs)
 
 
@@ -81,11 +87,15 @@ def create():
 
 
 @certificates_bp.route("/<int:cert_id>")
-@admin_required
+@login_required
 def detail(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
         flash("Certificate not found.", "danger")
+        return redirect(url_for("certificates.list_certs"))
+
+    if not current_user.is_admin and certificate.requested_by != current_user.id:
+        flash("You do not have permission to view this certificate.", "danger")
         return redirect(url_for("certificates.list_certs"))
 
     san_list = json.loads(certificate.san_json) if certificate.san_json else []
@@ -116,11 +126,15 @@ def revoke(cert_id):
 
 
 @certificates_bp.route("/<int:cert_id>/download")
-@admin_required
+@login_required
 def download(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
         flash("Certificate not found.", "danger")
+        return redirect(url_for("certificates.list_certs"))
+
+    if not current_user.is_admin and certificate.requested_by != current_user.id:
+        flash("You do not have permission to download this certificate.", "danger")
         return redirect(url_for("certificates.list_certs"))
 
     fmt = request.args.get("format", "pem")
