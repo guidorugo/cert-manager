@@ -128,12 +128,12 @@ def sign(csr_id):
         if not ca:
             flash("CA not found.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
         if ca.is_revoked:
             flash("Cannot sign CSR with a revoked CA.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
         passphrase = current_app.config["MASTER_PASSPHRASE"]
 
