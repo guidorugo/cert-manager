@@ -71,7 +71,8 @@ EKU_MAP = {
 
 
 def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
-             key_usage=None, extended_key_usage=None, ocsp_url=None):
+             key_usage=None, extended_key_usage=None, ocsp_url=None,
+             crl_dp_url=None):
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
     ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
     csr = x509.load_pem_x509_csr(csr_model.csr_pem.encode())
@@ -175,6 +176,18 @@ def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
             critical=False,
         )
 
+    # CRL Distribution Points
+    if crl_dp_url:
+        builder = builder.add_extension(
+            x509.CRLDistributionPoints([
+                x509.DistributionPoint(
+                    full_name=[x509.UniformResourceIdentifier(crl_dp_url)],
+                    relative_name=None, crl_issuer=None, reasons=None,
+                ),
+            ]),
+            critical=False,
+        )
+
     cert = builder.sign(ca_key, _get_hash_algorithm(ca_key))
     cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
 
@@ -222,7 +235,8 @@ def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
 
 def create_certificate(ca, subject_attrs, san_list, validity_days, passphrase,
                        key_type="RSA", key_size=2048, key_usage=None,
-                       extended_key_usage=None, ocsp_url=None):
+                       extended_key_usage=None, ocsp_url=None,
+                       crl_dp_url=None):
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
     ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
 
@@ -320,6 +334,18 @@ def create_certificate(ca, subject_attrs, san_list, validity_days, passphrase,
                 x509.AccessDescription(
                     x509.oid.AuthorityInformationAccessOID.OCSP,
                     x509.UniformResourceIdentifier(ocsp_url),
+                ),
+            ]),
+            critical=False,
+        )
+
+    # CRL Distribution Points
+    if crl_dp_url:
+        builder = builder.add_extension(
+            x509.CRLDistributionPoints([
+                x509.DistributionPoint(
+                    full_name=[x509.UniformResourceIdentifier(crl_dp_url)],
+                    relative_name=None, crl_issuer=None, reasons=None,
                 ),
             ]),
             critical=False,

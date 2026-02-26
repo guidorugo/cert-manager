@@ -106,6 +106,96 @@
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-header" role="button" data-bs-toggle="collapse" data-bs-target="#advancedSettings" aria-expanded="false" aria-controls="advancedSettings" style="cursor: pointer;">
+            Advanced Settings <span id="advancedToggle">&#9654;</span>
+        </div>
+        <div class="collapse" id="advancedSettings">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="cert_profile" class="form-label">Certificate Profile
+                        <span class="field-info" data-bs-toggle="tooltip" title="Preset profiles configure Key Usage and Extended Key Usage for common scenarios.">!</span>
+                    </label>
+                    <select class="form-select" id="cert_profile" onchange="applyProfile()">
+                        <option value="webServer" selected>Web Server</option>
+                        <option value="clientAuth">Client Auth</option>
+                        <option value="email">Email / S-MIME</option>
+                        <option value="codeSigning">Code Signing</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Key Usage</label>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input ku-check" type="checkbox" name="ku_digital_signature" id="ku_digital_signature" checked onchange="syncProfile()">
+                                <label class="form-check-label" for="ku_digital_signature">Digital Signature</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input ku-check" type="checkbox" name="ku_key_encipherment" id="ku_key_encipherment" checked onchange="syncProfile()">
+                                <label class="form-check-label" for="ku_key_encipherment">Key Encipherment</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input ku-check" type="checkbox" name="ku_content_commitment" id="ku_content_commitment" onchange="syncProfile()">
+                                <label class="form-check-label" for="ku_content_commitment">Content Commitment</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input ku-check" type="checkbox" name="ku_data_encipherment" id="ku_data_encipherment" onchange="syncProfile()">
+                                <label class="form-check-label" for="ku_data_encipherment">Data Encipherment</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input ku-check" type="checkbox" name="ku_key_agreement" id="ku_key_agreement" onchange="syncProfile()">
+                                <label class="form-check-label" for="ku_key_agreement">Key Agreement</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Extended Key Usage</label>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input eku-check" type="checkbox" name="eku_serverAuth" id="eku_serverAuth" checked onchange="syncProfile()">
+                                <label class="form-check-label" for="eku_serverAuth">Server Auth (TLS)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input eku-check" type="checkbox" name="eku_clientAuth" id="eku_clientAuth" checked onchange="syncProfile()">
+                                <label class="form-check-label" for="eku_clientAuth">Client Auth</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input eku-check" type="checkbox" name="eku_codeSigning" id="eku_codeSigning" onchange="syncProfile()">
+                                <label class="form-check-label" for="eku_codeSigning">Code Signing</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input eku-check" type="checkbox" name="eku_emailProtection" id="eku_emailProtection" onchange="syncProfile()">
+                                <label class="form-check-label" for="eku_emailProtection">Email Protection</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input eku-check" type="checkbox" name="eku_timeStamping" id="eku_timeStamping" onchange="syncProfile()">
+                                <label class="form-check-label" for="eku_timeStamping">Time Stamping</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input eku-check" type="checkbox" name="eku_ocspSigning" id="eku_ocspSigning" onchange="syncProfile()">
+                                <label class="form-check-label" for="eku_ocspSigning">OCSP Signing</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="crl_dp" class="form-label">CRL Distribution Point
+                        <span class="field-info" data-bs-toggle="tooltip" title="URL where the CRL for the issuing CA can be downloaded. Auto-populated based on the selected CA.">!</span>
+                    </label>
+                    <input type="text" class="form-control" id="crl_dp" readonly>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <button type="submit" class="btn btn-primary">Create Certificate</button>
     <a href="{{ url_for('certificates.list_certs') }}" class="btn btn-secondary">Cancel</a>
 </form>
@@ -125,5 +215,56 @@ function updateKeySizes() {
         keySizeSelect.add(new Option('384', '384'));
     }
 }
+
+var profiles = {
+    webServer:   { ku: ['ku_digital_signature', 'ku_key_encipherment'], eku: ['eku_serverAuth', 'eku_clientAuth'] },
+    clientAuth:  { ku: ['ku_digital_signature'], eku: ['eku_clientAuth'] },
+    email:       { ku: ['ku_digital_signature', 'ku_key_encipherment', 'ku_content_commitment'], eku: ['eku_emailProtection'] },
+    codeSigning: { ku: ['ku_digital_signature'], eku: ['eku_codeSigning'] },
+};
+
+function applyProfile() {
+    var p = document.getElementById('cert_profile').value;
+    if (p === 'custom') return;
+    var cfg = profiles[p];
+    document.querySelectorAll('.ku-check').forEach(function(cb) { cb.checked = cfg.ku.indexOf(cb.id) !== -1; });
+    document.querySelectorAll('.eku-check').forEach(function(cb) { cb.checked = cfg.eku.indexOf(cb.id) !== -1; });
+}
+
+function syncProfile() {
+    var sel = document.getElementById('cert_profile');
+    var kuState = [];
+    document.querySelectorAll('.ku-check:checked').forEach(function(cb) { kuState.push(cb.id); });
+    var ekuState = [];
+    document.querySelectorAll('.eku-check:checked').forEach(function(cb) { ekuState.push(cb.id); });
+    kuState.sort(); ekuState.sort();
+    var matched = false;
+    for (var name in profiles) {
+        var pk = profiles[name].ku.slice().sort();
+        var pe = profiles[name].eku.slice().sort();
+        if (JSON.stringify(pk) === JSON.stringify(kuState) && JSON.stringify(pe) === JSON.stringify(ekuState)) {
+            sel.value = name;
+            matched = true;
+            break;
+        }
+    }
+    if (!matched) sel.value = 'custom';
+}
+
+function updateCrlDp() {
+    var caId = document.getElementById('ca_id').value;
+    var url = '{{ ocsp_scheme }}://{{ ocsp_server }}/public/crl/' + caId + '.crl';
+    document.getElementById('crl_dp').value = url;
+}
+
+document.getElementById('ca_id').addEventListener('change', updateCrlDp);
+document.addEventListener('DOMContentLoaded', updateCrlDp);
+
+document.getElementById('advancedSettings').addEventListener('show.bs.collapse', function() {
+    document.getElementById('advancedToggle').innerHTML = '&#9660;';
+});
+document.getElementById('advancedSettings').addEventListener('hide.bs.collapse', function() {
+    document.getElementById('advancedToggle').innerHTML = '&#9654;';
+});
 </script>
 {% endblock %}
