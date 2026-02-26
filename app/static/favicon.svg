@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Shield body -->
+  <path d="M32 4 L56 14 L56 30 C56 46 44 56 32 60 C20 56 8 46 8 30 L8 14 Z" fill="#2563eb" stroke="#1e40af" stroke-width="2"/>
+  <!-- Inner shield highlight -->
+  <path d="M32 8 L52 16.5 L52 30 C52 43.5 41.5 52.5 32 56 C22.5 52.5 12 43.5 12 30 L12 16.5 Z" fill="#3b82f6"/>
+  <!-- Certificate/seal circle -->
+  <circle cx="32" cy="30" r="13" fill="#ffffff" opacity="0.95"/>
+  <!-- Checkmark -->
+  <polyline points="24,30 29,36 40,24" fill="none" stroke="#2563eb" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Seal ribbons -->
+  <path d="M26 42 L22 54 L27 50 L30 56 L30 44" fill="#fbbf24" stroke="#f59e0b" stroke-width="0.5"/>
+  <path d="M38 42 L42 54 L37 50 L34 56 L34 44" fill="#fbbf24" stroke="#f59e0b" stroke-width="0.5"/>
+</svg>
