@@ -1,6 +1,7 @@
 import json
 
 from cryptography import x509
+from cryptography.x509.oid import ExtendedKeyUsageOID
 
 from app.services import ca_service, cert_service, csr_service, crl_service
 from app.models.certificate import Certificate
@@ -102,3 +103,132 @@ def test_revoke_and_crl(app, db):
         revoked = list(crl)
         assert len(revoked) == 1
         assert revoked[0].serial_number == int(cert.serial_number, 16)
+
+
+def test_create_certificate_custom_key_usage(app, db):
+    with app.app_context():
+        ca = _create_test_ca()
+        key_usage = {
+            "digital_signature": True,
+            "key_encipherment": False,
+            "content_commitment": False,
+            "data_encipherment": False,
+            "key_agreement": False,
+        }
+        cert = cert_service.create_certificate(
+            ca=ca,
+            subject_attrs={"CN": "ku.example.com"},
+            san_list=[],
+            validity_days=365,
+            passphrase="test-passphrase",
+            key_usage=key_usage,
+        )
+
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        ku_ext = x509_cert.extensions.get_extension_for_class(x509.KeyUsage)
+        assert ku_ext.value.digital_signature is True
+        assert ku_ext.value.key_encipherment is False
+        assert ku_ext.critical is True
+
+
+def test_create_certificate_custom_eku(app, db):
+    with app.app_context():
+        ca = _create_test_ca()
+        cert = cert_service.create_certificate(
+            ca=ca,
+            subject_attrs={"CN": "eku.example.com"},
+            san_list=[],
+            validity_days=365,
+            passphrase="test-passphrase",
+            extended_key_usage=["codeSigning"],
+        )
+
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        eku_ext = x509_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+        oids = list(eku_ext.value)
+        assert ExtendedKeyUsageOID.CODE_SIGNING in oids
+        assert ExtendedKeyUsageOID.SERVER_AUTH not in oids
+
+
+def test_create_certificate_crl_dp(app, db):
+    with app.app_context():
+        ca = _create_test_ca()
+        crl_url = "http://localhost:5000/public/crl/1.crl"
+        cert = cert_service.create_certificate(
+            ca=ca,
+            subject_attrs={"CN": "crldp.example.com"},
+            san_list=[],
+            validity_days=365,
+            passphrase="test-passphrase",
+            crl_dp_url=crl_url,
+        )
+
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        dp_ext = x509_cert.extensions.get_extension_for_class(x509.CRLDistributionPoints)
+        dps = list(dp_ext.value)
+        assert len(dps) == 1
+        assert dps[0].full_name[0].value == crl_url
+
+
+def test_sign_csr_custom_ku_eku(app, db):
+    with app.app_context():
+        ca = _create_test_ca()
+        csr_model, _, _ = csr_service.create_csr(
+            subject_attrs={"CN": "csrku.example.com"},
+            san_list=["csrku.example.com"],
+            key_type="RSA",
+            key_size=2048,
+        )
+
+        key_usage = {
+            "digital_signature": True,
+            "key_encipherment": False,
+            "content_commitment": True,
+            "data_encipherment": False,
+            "key_agreement": False,
+        }
+        cert = cert_service.sign_csr(
+            csr_model=csr_model,
+            ca=ca,
+            validity_days=365,
+            passphrase="test-passphrase",
+            key_usage=key_usage,
+            extended_key_usage=["emailProtection"],
+        )
+
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        ku_ext = x509_cert.extensions.get_extension_for_class(x509.KeyUsage)
+        assert ku_ext.value.digital_signature is True
+        assert ku_ext.value.key_encipherment is False
+        assert ku_ext.value.content_commitment is True
+
+        eku_ext = x509_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+        oids = list(eku_ext.value)
+        assert ExtendedKeyUsageOID.EMAIL_PROTECTION in oids
+        assert len(oids) == 1
+
+
+def test_sign_csr_crl_dp(app, db):
+    with app.app_context():
+        ca = _create_test_ca()
+        csr_model, _, _ = csr_service.create_csr(
+            subject_attrs={"CN": "csrcrldp.example.com"},
+            san_list=[],
+            key_type="RSA",
+            key_size=2048,
+        )
+
+        crl_url = "http://ca.example.com/public/crl/1.crl"
+        cert = cert_service.sign_csr(
+            csr_model=csr_model,
+            ca=ca,
+            validity_days=365,
+            passphrase="test-passphrase",
+            crl_dp_url=crl_url,
+        )
+
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        dp_ext = x509_cert.extensions.get_extension_for_class(x509.CRLDistributionPoints)
+        dps = list(dp_ext.value)
+        assert len(dps) == 1
+        assert dps[0].full_name[0].value == crl_url
