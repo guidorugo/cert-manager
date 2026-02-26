@@ -5,7 +5,8 @@ A web-based X.509 Certificate Authority management application built with Python
 ## Features
 
 - **CA Management**: Create root and intermediate Certificate Authorities with RSA or EC keys
-- **Certificate Issuance**: Generate certificates with SANs, key usage, and extended key usage
+- **Certificate Issuance**: Generate certificates with SANs, key usage, extended key usage, and CRL Distribution Points
+- **Advanced Certificate Settings**: Collapsible UI with certificate profile presets (Web Server, Client Auth, Email/S-MIME, Code Signing), Key Usage and Extended Key Usage checkboxes, and auto-populated CRL Distribution Points
 - **CSR Management**: Create or import Certificate Signing Requests, sign or reject them
 - **Revocation**: Revoke certificates with standard reasons, generate CRLs
 - **OCSP Responder**: Built-in OCSP endpoint for real-time certificate status checks
@@ -67,11 +68,11 @@ Go to **CAs > Create CA**, fill in the subject details, choose key type (RSA 204
 
 ### 2. Issue a Certificate
 
-Go to **Certificates > Create Certificate**, select the issuing CA, fill in subject and SANs.
+Go to **Certificates > Create Certificate**, select the issuing CA, fill in subject and SANs. Expand **Advanced Settings** to choose a certificate profile (Web Server, Client Auth, Email/S-MIME, Code Signing) or manually configure Key Usage and Extended Key Usage. CRL Distribution Points are auto-populated based on the selected CA.
 
 ### 3. Manage CSRs
 
-Go to **CSRs > Create CSR** to generate or upload a CSR. Then sign it with a CA from the CSR detail page.
+Go to **CSRs > Create CSR** to generate or upload a CSR. Then sign it with a CA from the CSR detail page. The signing form also includes **Advanced Settings** for profile selection and extension customization.
 
 ### 4. Revoke & CRL
 
