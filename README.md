@@ -13,6 +13,7 @@ A web-based X.509 Certificate Authority management application built with Python
 - **Role-Based Access Control**: Admin and CSR User roles with enforced separation of duties
 - **Audit Logging**: Every sensitive action logged with user, timestamp, IP, and details
 - **User Management**: Admin UI for creating users, assigning roles, and managing accounts
+- **HTTP Basic Auth**: Stateless API access via `curl -u user:pass` for scripts and automation, alongside session-based browser auth
 - **Security**: Private keys encrypted at rest with Fernet (PBKDF2-derived key, 600k iterations), session hardening, insecure-default rejection
 
 ## Quick Start
@@ -101,7 +102,21 @@ Cert Manager is a web application with form-based (HTML) endpoints. All authenti
 
 ### Authentication
 
-All authenticated endpoints require a session cookie obtained by logging in:
+#### HTTP Basic Auth (recommended for scripts/automation)
+
+All authenticated endpoints support HTTP Basic Auth — no session or CSRF token needed:
+
+```bash
+# Simple access with Basic Auth
+curl -u admin:admin http://localhost:5000/ca/
+
+# POST requests work without CSRF tokens
+curl -u admin:admin -X POST http://localhost:5000/ca/1/crl
+```
+
+#### Session Cookies (browser / legacy)
+
+Alternatively, authenticate via session cookie:
 
 ```bash
 # Login and save session cookie
@@ -146,7 +161,7 @@ openssl ocsp \
 
 ### Authenticated Endpoints
 
-All authenticated endpoints require a valid session cookie (see [Authentication](#authentication) above). CSRF tokens are required for POST requests when `WTF_CSRF_ENABLED` is active (enabled by default).
+All authenticated endpoints support HTTP Basic Auth or session cookies (see [Authentication](#authentication) above). CSRF tokens are required for session-based POST requests but are not needed when using Basic Auth.
 
 #### CA Management (admin only)
 
@@ -232,6 +247,8 @@ python -m pytest tests/ -v
 | `SESSION_LIFETIME_MINUTES` | `30` | Session timeout in minutes |
 | `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting (requires Flask-Limiter) |
 | `RATE_LIMIT_DEFAULT` | `60/minute` | Default rate limit when enabled |
+| `BASIC_AUTH_ENABLED` | `true` | Enable HTTP Basic Auth for programmatic access |
+| `BASIC_AUTH_REALM` | `cert-manager` | Basic Auth realm name in `WWW-Authenticate` header |
 
 ## Architecture
 
