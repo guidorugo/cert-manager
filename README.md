@@ -25,7 +25,7 @@ cp .env.example .env
 # Edit .env with your settings
 
 # Build and run
-docker-compose up --build
+docker compose up --build
 ```
 
 Navigate to `http://localhost:5000` and log in with the default credentials (admin/admin).
@@ -47,7 +47,7 @@ docker run -d \
   ghcr.io/guidorugo/cert-manager:latest
 ```
 
-You can also use the pre-built image with docker-compose by commenting out the `build` line and uncommenting the `image` line in `docker-compose.yml`.
+You can also use the pre-built image with docker compose by commenting out the `build` line and uncommenting the `image` line in `docker-compose.yml`.
 
 ### Local Development
 
