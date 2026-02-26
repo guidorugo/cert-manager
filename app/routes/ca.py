@@ -84,12 +84,18 @@ def create():
             state = request.form.get("state", "").strip()
             locality = request.form.get("locality", "").strip()
             key_type = request.form.get("key_type", "RSA")
-            key_size = int(request.form.get("key_size", "2048"))
-            validity_days = int(request.form.get("validity_days", "3650"))
             ca_type = request.form.get("ca_type", "root")
             parent_id = request.form.get("parent_id")
             path_length_str = request.form.get("path_length", "").strip()
-            path_length = int(path_length_str) if path_length_str else None
+
+            try:
+                key_size = int(request.form.get("key_size", "2048"))
+                validity_days = int(request.form.get("validity_days", "3650"))
+                path_length = int(path_length_str) if path_length_str else None
+            except ValueError:
+                flash("Key size, validity days, and path length must be valid numbers.", "danger")
+                return render_template("ca/create.html",
+                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
             if not name or not cn:
                 flash("Name and Common Name are required.", "danger")
@@ -104,7 +110,13 @@ def create():
 
             try:
                 if ca_type == "intermediate" and parent_id:
-                    parent_ca = db.session.get(CertificateAuthority, int(parent_id))
+                    try:
+                        parent_ca_id = int(parent_id)
+                    except ValueError:
+                        flash("Invalid parent CA ID.", "danger")
+                        return render_template("ca/create.html",
+                                               cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                    parent_ca = db.session.get(CertificateAuthority, parent_ca_id)
                     if not parent_ca:
                         flash("Parent CA not found.", "danger")
                         return render_template("ca/create.html",

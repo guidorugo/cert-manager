@@ -1,10 +1,21 @@
+from urllib.parse import urlparse
+
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash
 
 from ..extensions import db
 from ..models.user import User
 from ..services import audit_service
 from ..services.audit_service import sanitize_username_for_log
+
+
+def _is_safe_url(target):
+    """Reject absolute URLs that redirect off-site."""
+    if not target:
+        return False
+    parsed = urlparse(target)
+    return not parsed.netloc
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -16,6 +27,8 @@ def login():
         password = request.form.get("password", "")
 
         user = User.query.filter_by(username=username).first()
+        if user is None:
+            generate_password_hash("dummy-password")
         if user and user.check_password(password):
             if not user.is_active:
                 audit_service.log_action(
@@ -30,7 +43,9 @@ def login():
             audit_service.log_action("login_success", target_type="user", target_id=user.id)
             db.session.commit()
             next_page = request.args.get("next")
-            return redirect(next_page or url_for("dashboard.index"))
+            if next_page and _is_safe_url(next_page):
+                return redirect(next_page)
+            return redirect(url_for("dashboard.index"))
 
         audit_service.log_action(
             "login_failure", target_type="user",
