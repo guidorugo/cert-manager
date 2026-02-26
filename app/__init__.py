@@ -110,6 +110,22 @@ def _migrate_schema():
                 "ALTER TABLE users ADD COLUMN is_active_user BOOLEAN NOT NULL DEFAULT 1"
             ))
 
+    # Migrate certificate_authorities table
+    if "certificate_authorities" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("certificate_authorities")}
+        if "is_revoked" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN is_revoked BOOLEAN NOT NULL DEFAULT 0"
+            ))
+        if "revoked_at" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN revoked_at DATETIME"
+            ))
+        if "revocation_reason" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN revocation_reason VARCHAR(50)"
+            ))
+
     # Migrate certificate_signing_requests table
     if "certificate_signing_requests" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("certificate_signing_requests")}
