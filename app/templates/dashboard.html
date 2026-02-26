@@ -8,7 +8,7 @@
     <div class="col-md-3">
         <div class="card text-bg-primary mb-3">
             <div class="card-body">
-                <h5 class="card-title">Certificate Authorities</h5>
+                <h5 class="card-title">Active CAs</h5>
                 <p class="card-text display-6">{{ stats.ca_count }}</p>
             </div>
         </div>
@@ -49,12 +49,19 @@
             <div class="card-body">
                 {% if recent_cas %}
                 <table class="table table-sm">
-                    <thead><tr><th>Name</th><th>Type</th><th>Created</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Created</th></tr></thead>
                     <tbody>
                     {% for ca in recent_cas %}
                     <tr>
                         <td><a href="{{ url_for('ca.detail', ca_id=ca.id) }}">{{ ca.name }}</a></td>
                         <td>{{ "Root" if ca.is_root else "Intermediate" }}</td>
+                        <td>
+                            {% if ca.is_revoked %}
+                            <span class="badge bg-danger">Revoked</span>
+                            {% else %}
+                            <span class="badge bg-success">Active</span>
+                            {% endif %}
+                        </td>
                         <td>{{ ca.created_at.strftime('%Y-%m-%d') }}</td>
                     </tr>
                     {% endfor %}
