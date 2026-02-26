@@ -249,6 +249,8 @@ python -m pytest tests/ -v
 | `RATE_LIMIT_DEFAULT` | `60/minute` | Default rate limit when enabled |
 | `BASIC_AUTH_ENABLED` | `true` | Enable HTTP Basic Auth for programmatic access |
 | `BASIC_AUTH_REALM` | `cert-manager` | Basic Auth realm name in `WWW-Authenticate` header |
+| `OCSP_URL_SCHEME` | `http` | URL scheme for OCSP AIA URLs in certificates (`https` recommended for production) |
+| `SESSION_COOKIE_SECURE` | `false` | Send session cookie only over HTTPS (set to `true` in production) |
 
 ## Architecture
 

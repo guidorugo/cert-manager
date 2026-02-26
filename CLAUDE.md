@@ -71,9 +71,15 @@ python -m pytest tests/ -v
 - Audit log viewable at `/users/audit-log` (admin only, paginated).
 
 ## Security Hardening
-- **Insecure default rejection**: App refuses to start in non-debug, non-testing mode if `SECRET_KEY` or `MASTER_PASSPHRASE` are set to their insecure defaults (`sys.exit(1)`).
-- **Session cookies**: HttpOnly, SameSite=Lax.
+- **Insecure default rejection**: App refuses to start in non-debug, non-testing mode if `SECRET_KEY`, `MASTER_PASSPHRASE`, or `ADMIN_PASSWORD` are set to their insecure defaults (`sys.exit(1)`).
+- **Session cookies**: HttpOnly, SameSite=Lax. `SESSION_COOKIE_SECURE` configurable (default: false, set to true in production).
 - **Session timeout**: Configurable via `SESSION_LIFETIME_MINUTES` (default 30).
+- **Security headers**: `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY` on all responses.
+- **Open redirect protection**: Login `next` parameter validated to reject absolute/external URLs.
+- **Timing attack mitigation**: Dummy hash computation on failed login for nonexistent users.
+- **SRI**: Bootstrap CDN resources include `integrity` and `crossorigin` attributes.
+- **Content-Disposition sanitization**: Filenames in download headers are sanitized to prevent header injection.
+- **OCSP URL scheme**: Configurable via `OCSP_URL_SCHEME` (default: `http`, set to `https` in production).
 - **Schema migration**: `_migrate_schema()` in `app/__init__.py` handles adding new columns to existing SQLite tables via ALTER TABLE.
 - **Last-admin guards**: Cannot deactivate or demote the last active admin user.
 
@@ -98,3 +104,5 @@ python -m pytest tests/ -v
 - `RATE_LIMIT_DEFAULT` - Default rate limit when enabled (default: 60/minute)
 - `BASIC_AUTH_ENABLED` - Enable HTTP Basic Auth (default: true)
 - `BASIC_AUTH_REALM` - Basic Auth realm name (default: cert-manager)
+- `OCSP_URL_SCHEME` - URL scheme for OCSP AIA URLs in certificates (default: http, use https in production)
+- `SESSION_COOKIE_SECURE` - Send session cookie only over HTTPS (default: false, set to true in production)

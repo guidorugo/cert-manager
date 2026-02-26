@@ -56,8 +56,13 @@ def create():
             state = request.form.get("state", "").strip()
             locality = request.form.get("locality", "").strip()
             key_type = request.form.get("key_type", "RSA")
-            key_size = int(request.form.get("key_size", "2048"))
             san_raw = request.form.get("san", "").strip()
+
+            try:
+                key_size = int(request.form.get("key_size", "2048"))
+            except ValueError:
+                flash("Key size must be a valid number.", "danger")
+                return render_template("csr/create.html")
 
             if not cn:
                 flash("Common Name is required.", "danger")
@@ -121,8 +126,13 @@ def sign(csr_id):
         return redirect(url_for("csr.detail", csr_id=csr_id))
 
     if request.method == "POST":
-        ca_id = int(request.form.get("ca_id"))
-        validity_days = int(request.form.get("validity_days", "365"))
+        try:
+            ca_id = int(request.form.get("ca_id"))
+            validity_days = int(request.form.get("validity_days", "365"))
+        except (ValueError, TypeError):
+            flash("CA ID and validity days must be valid numbers.", "danger")
+            return render_template("csr/sign.html", csr=csr_model,
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
@@ -138,7 +148,8 @@ def sign(csr_id):
         passphrase = current_app.config["MASTER_PASSPHRASE"]
 
         server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
-        ocsp_url = f"http://{server}/public/ocsp/{ca_id}"
+        scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
+        ocsp_url = f"{scheme}://{server}/public/ocsp/{ca_id}"
 
         try:
             certificate = cert_service.sign_csr(
