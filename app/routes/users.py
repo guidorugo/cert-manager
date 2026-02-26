@@ -23,13 +23,13 @@ def create_user():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        role = request.form.get("role", "csr_user")
+        role = request.form.get("role", "csr_requester")
 
         if not username or not password:
             flash("Username and password are required.", "danger")
             return render_template("users/create.html")
 
-        if role not in ("admin", "csr_user", "csr_requester"):
+        if role not in ("admin", "csr_requester"):
             flash("Invalid role.", "danger")
             return render_template("users/create.html")
 
@@ -60,7 +60,7 @@ def edit_user(user_id):
 
     if request.method == "POST":
         new_role = request.form.get("role", user.role)
-        if new_role not in ("admin", "csr_user", "csr_requester"):
+        if new_role not in ("admin", "csr_requester"):
             flash("Invalid role.", "danger")
             return render_template("users/edit.html", user=user)
 

@@ -44,9 +44,9 @@ def admin_user(db):
 
 
 @pytest.fixture
-def csr_user(db):
-    user = User(username="testcsruser", role="csr_user")
-    user.set_password("csrpass")
+def csr_requester(db):
+    user = User(username="testrequester", role="csr_requester")
+    user.set_password("requesterpass")
     db.session.add(user)
     db.session.commit()
     return user
@@ -59,24 +59,6 @@ def auth_admin(client, admin_user):
         "password": "adminpass",
     })
     return client
-
-
-@pytest.fixture
-def auth_csr_user(client, csr_user):
-    client.post("/auth/login", data={
-        "username": "testcsruser",
-        "password": "csrpass",
-    })
-    return client
-
-
-@pytest.fixture
-def csr_requester(db):
-    user = User(username="testrequester", role="csr_requester")
-    user.set_password("requesterpass")
-    db.session.add(user)
-    db.session.commit()
-    return user
 
 
 @pytest.fixture
