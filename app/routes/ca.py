@@ -151,6 +151,53 @@ def detail(ca_id):
     return render_template("ca/detail.html", ca=ca, chain=chain)
 
 
+@ca_bp.route("/<int:ca_id>/revoke", methods=["GET", "POST"])
+@admin_required
+def revoke(ca_id):
+    ca = db.session.get(CertificateAuthority, ca_id)
+    if not ca:
+        flash("CA not found.", "danger")
+        return redirect(url_for("ca.list_cas"))
+
+    if ca.is_revoked:
+        flash("CA is already revoked.", "warning")
+        return redirect(url_for("ca.detail", ca_id=ca.id))
+
+    if request.method == "POST":
+        reason = request.form.get("reason", "unspecified")
+        try:
+            _, certs_revoked, sub_cas_revoked = crl_service.revoke_ca(ca_id, reason)
+            audit_service.log_action("revoke_ca", target_type="ca", target_id=ca_id,
+                                     details={"reason": reason, "certs_revoked": certs_revoked,
+                                              "sub_cas_revoked": sub_cas_revoked})
+            db.session.commit()
+            msg = f"CA '{ca.name}' revoked."
+            if certs_revoked:
+                msg += f" {certs_revoked} certificate(s) revoked."
+            if sub_cas_revoked:
+                msg += f" {sub_cas_revoked} sub-CA(s) revoked."
+            flash(msg, "success")
+            return redirect(url_for("ca.detail", ca_id=ca.id))
+        except Exception as e:
+            flash(f"Error revoking CA: {e}", "danger")
+
+    # Count affected items for the confirmation page
+    from ..models.certificate import Certificate
+    cert_count = Certificate.query.filter_by(ca_id=ca.id, is_revoked=False).count()
+    sub_ca_count = _count_active_sub_cas(ca)
+    return render_template("ca/revoke.html", ca=ca, cert_count=cert_count, sub_ca_count=sub_ca_count)
+
+
+def _count_active_sub_cas(ca):
+    """Recursively count non-revoked sub-CAs."""
+    count = 0
+    for child in ca.children:
+        if not child.is_revoked:
+            count += 1
+            count += _count_active_sub_cas(child)
+    return count
+
+
 @ca_bp.route("/<int:ca_id>/crl", methods=["POST"])
 @admin_required
 def generate_crl(ca_id):
@@ -158,6 +205,10 @@ def generate_crl(ca_id):
     if not ca:
         flash("CA not found.", "danger")
         return redirect(url_for("ca.list_cas"))
+
+    if ca.is_revoked:
+        flash("Cannot generate CRL for a revoked CA.", "danger")
+        return redirect(url_for("ca.detail", ca_id=ca.id))
 
     passphrase = current_app.config["MASTER_PASSPHRASE"]
     try:

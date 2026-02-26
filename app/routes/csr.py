@@ -130,6 +130,11 @@ def sign(csr_id):
             return render_template("csr/sign.html", csr=csr_model,
                                    cas=CertificateAuthority.query.all())
 
+        if ca.is_revoked:
+            flash("Cannot sign CSR with a revoked CA.", "danger")
+            return render_template("csr/sign.html", csr=csr_model,
+                                   cas=CertificateAuthority.query.all())
+
         passphrase = current_app.config["MASTER_PASSPHRASE"]
 
         server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
