@@ -54,6 +54,8 @@ python -m pytest tests/ -v
 - **Private key encryption**: Fernet + PBKDF2-HMAC-SHA256 (600k iterations). Salt stored with ciphertext.
 - **Master passphrase**: From `MASTER_PASSPHRASE` env var. Used for all key encrypt/decrypt.
 - **OCSP**: Built-in responder at `/public/ocsp/<ca_id>`. Certificates include AIA extension.
+- **CRL Distribution Points**: Auto-populated in certificates using `{scheme}://{server}/public/crl/{ca_id}.crl`. Added via `crl_dp_url` parameter in `cert_service.create_certificate()` and `cert_service.sign_csr()`.
+- **Certificate profiles**: Both certificate creation and CSR signing forms have a collapsible Advanced Settings section with profile presets (Web Server, Client Auth, Email/S-MIME, Code Signing, Custom) that configure Key Usage and Extended Key Usage checkboxes. Default profile (Web Server) matches previous hardcoded defaults for backward compatibility.
 - **Public endpoints**: CRL download and CA cert download require no auth.
 - **Database**: SQLite, stored in `./data/` (Docker volume).
 
