@@ -13,6 +13,9 @@ class Config:
 
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
+
+    OCSP_URL_SCHEME = os.environ.get("OCSP_URL_SCHEME", "http")
     PERMANENT_SESSION_LIFETIME = timedelta(
         minutes=int(os.environ.get("SESSION_LIFETIME_MINUTES", "30"))
     )
@@ -25,3 +28,4 @@ class Config:
 
     _INSECURE_SECRET_KEY = "dev-secret-key"
     _INSECURE_PASSPHRASE = "dev-passphrase"
+    _INSECURE_ADMIN_PASSWORD = "admin"

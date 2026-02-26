@@ -18,6 +18,7 @@ def create_app(config_class=Config):
 
     _check_security(app)
     _configure_session(app)
+    _setup_security_headers(app)
     _setup_rate_limiting(app)
 
     from .routes.auth import auth_bp
@@ -118,6 +119,22 @@ def _check_security(app):
         print("FATAL: MASTER_PASSPHRASE is set to the insecure default. "
               "Set a strong MASTER_PASSPHRASE environment variable.", file=sys.stderr)
         sys.exit(1)
+
+    insecure_admin_password = Config._INSECURE_ADMIN_PASSWORD
+    if app.config.get("ADMIN_PASSWORD") == insecure_admin_password:
+        print("FATAL: ADMIN_PASSWORD is set to the insecure default. "
+              "Set a strong ADMIN_PASSWORD environment variable.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _setup_security_headers(app):
+    """Add security response headers to all responses."""
+
+    @app.after_request
+    def set_security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
 
 
 def _configure_session(app):
