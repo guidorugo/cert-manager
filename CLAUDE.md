@@ -59,9 +59,10 @@ python -m pytest tests/ -v
 
 ## Roles & Access Control
 - **admin**: Full access to all routes (CAs, certificates, CSR signing/rejection, user management, audit log).
-- **csr_user**: Can only create/upload CSRs and view their own. Cannot access CA, certificate, or user management routes.
+- **csr_user**: Can create/upload CSRs and view their own. Cannot access CA, certificate, or user management routes.
+- **csr_requester**: Can only create/upload CSRs and view their own. Same access as `csr_user` — intended for users who only need to submit certificate requests.
 - Routes are protected by `@admin_required` or `@login_required` decorators in `app/decorators.py`.
-- CSR ownership enforced: `csr_user` can only see CSRs where `created_by == current_user.id`.
+- CSR ownership enforced: non-admin users can only see CSRs where `created_by == current_user.id`.
 - Templates conditionally hide admin-only links/buttons using `{% if current_user.is_admin %}`.
 
 ## Audit Logging
