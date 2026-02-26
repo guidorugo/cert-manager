@@ -90,32 +90,43 @@ def create():
         ocsp_url = f"{ocsp_scheme}://{ocsp_server}/public/ocsp/{ca_id}"
         crl_dp_url = f"{ocsp_scheme}://{ocsp_server}/public/crl/{ca_id}.crl"
 
-        # Parse Key Usage from checkboxes
-        key_usage = {
-            "digital_signature": "ku_digital_signature" in request.form,
-            "key_encipherment": "ku_key_encipherment" in request.form,
-            "content_commitment": "ku_content_commitment" in request.form,
-            "data_encipherment": "ku_data_encipherment" in request.form,
-            "key_agreement": "ku_key_agreement" in request.form,
-        }
+        # Parse Key Usage and Extended Key Usage from checkboxes
+        # If no ku_* fields are present at all (e.g. API call), use service defaults
+        ku_fields = ["ku_digital_signature", "ku_key_encipherment",
+                     "ku_content_commitment", "ku_data_encipherment", "ku_key_agreement"]
+        eku_fields = ["eku_serverAuth", "eku_clientAuth", "eku_codeSigning",
+                      "eku_emailProtection", "eku_timeStamping", "eku_ocspSigning"]
+        has_ku_fields = any(f in request.form for f in ku_fields)
+        has_eku_fields = any(f in request.form for f in eku_fields)
 
-        if not any(key_usage.values()):
-            flash("At least one Key Usage must be selected.", "danger")
-            cas = CertificateAuthority.query.filter_by(is_revoked=False).all()
-            return render_template("certificates/create.html", cas=cas,
-                                   ocsp_scheme=scheme, ocsp_server=server)
+        key_usage = None
+        extended_key_usage = None
 
-        # Parse Extended Key Usage from checkboxes
-        eku_names = ["serverAuth", "clientAuth", "codeSigning",
-                     "emailProtection", "timeStamping", "ocspSigning"]
-        extended_key_usage = [name for name in eku_names
-                              if f"eku_{name}" in request.form]
+        if has_ku_fields:
+            key_usage = {
+                "digital_signature": "ku_digital_signature" in request.form,
+                "key_encipherment": "ku_key_encipherment" in request.form,
+                "content_commitment": "ku_content_commitment" in request.form,
+                "data_encipherment": "ku_data_encipherment" in request.form,
+                "key_agreement": "ku_key_agreement" in request.form,
+            }
+            if not any(key_usage.values()):
+                flash("At least one Key Usage must be selected.", "danger")
+                cas = CertificateAuthority.query.filter_by(is_revoked=False).all()
+                return render_template("certificates/create.html", cas=cas,
+                                       ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+
+        if has_eku_fields:
+            eku_names = ["serverAuth", "clientAuth", "codeSigning",
+                         "emailProtection", "timeStamping", "ocspSigning"]
+            extended_key_usage = [name for name in eku_names
+                                  if f"eku_{name}" in request.form]
 
         try:
             certificate = cert_service.create_certificate(
                 ca, subject_attrs, san_list, validity_days, passphrase,
                 key_type=key_type, key_size=key_size, ocsp_url=ocsp_url,
-                key_usage=key_usage, extended_key_usage=extended_key_usage or None,
+                key_usage=key_usage, extended_key_usage=extended_key_usage,
                 crl_dp_url=crl_dp_url,
             )
             audit_service.log_action("create_certificate", target_type="certificate", target_id=certificate.id)

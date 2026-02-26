@@ -1,3 +1,4 @@
+import base64
 import json
 
 from cryptography import x509
@@ -5,6 +6,11 @@ from cryptography.x509.oid import ExtendedKeyUsageOID
 
 from app.services import ca_service, cert_service, csr_service, crl_service
 from app.models.certificate import Certificate
+
+
+def _basic_auth_headers(username, password):
+    credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {credentials}"}
 
 
 def _create_test_ca(passphrase="test-passphrase"):
@@ -232,3 +238,80 @@ def test_sign_csr_crl_dp(app, db):
         dps = list(dp_ext.value)
         assert len(dps) == 1
         assert dps[0].full_name[0].value == crl_url
+
+
+def test_api_create_cert_without_ku_eku_uses_defaults(app, client, admin_user, db):
+    """API calls without ku_*/eku_* fields should use service defaults."""
+    with app.app_context():
+        ca = _create_test_ca()
+        resp = client.post("/certificates/create", data={
+            "ca_id": str(ca.id),
+            "cn": "api-default.example.com",
+            "validity_days": "365",
+            "key_type": "RSA",
+            "key_size": "2048",
+        }, headers=_basic_auth_headers("testadmin", "adminpass"),
+           follow_redirects=True)
+        assert resp.status_code == 200
+
+        cert = Certificate.query.filter_by(common_name="api-default.example.com").first()
+        assert cert is not None
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        ku_ext = x509_cert.extensions.get_extension_for_class(x509.KeyUsage)
+        assert ku_ext.value.digital_signature is True
+        assert ku_ext.value.key_encipherment is True
+        eku_ext = x509_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+        oids = list(eku_ext.value)
+        assert ExtendedKeyUsageOID.SERVER_AUTH in oids
+        assert ExtendedKeyUsageOID.CLIENT_AUTH in oids
+
+
+def test_api_create_cert_with_custom_ku_eku(app, client, admin_user, db):
+    """API calls with explicit ku_*/eku_* fields should use those values."""
+    with app.app_context():
+        ca = _create_test_ca()
+        resp = client.post("/certificates/create", data={
+            "ca_id": str(ca.id),
+            "cn": "api-custom.example.com",
+            "validity_days": "365",
+            "key_type": "RSA",
+            "key_size": "2048",
+            "ku_digital_signature": "on",
+            "eku_codeSigning": "on",
+        }, headers=_basic_auth_headers("testadmin", "adminpass"),
+           follow_redirects=True)
+        assert resp.status_code == 200
+
+        cert = Certificate.query.filter_by(common_name="api-custom.example.com").first()
+        assert cert is not None
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        ku_ext = x509_cert.extensions.get_extension_for_class(x509.KeyUsage)
+        assert ku_ext.value.digital_signature is True
+        assert ku_ext.value.key_encipherment is False
+        eku_ext = x509_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+        oids = list(eku_ext.value)
+        assert ExtendedKeyUsageOID.CODE_SIGNING in oids
+        assert ExtendedKeyUsageOID.SERVER_AUTH not in oids
+
+
+def test_api_sign_csr_without_ku_eku_uses_defaults(app, client, admin_user, db):
+    """API CSR signing without ku_*/eku_* fields should use service defaults."""
+    with app.app_context():
+        ca = _create_test_ca()
+        csr_model, _, _ = csr_service.create_csr(
+            subject_attrs={"CN": "api-csr.example.com"},
+            san_list=[], key_type="RSA", key_size=2048,
+        )
+        resp = client.post(f"/csr/{csr_model.id}/sign", data={
+            "ca_id": str(ca.id),
+            "validity_days": "365",
+        }, headers=_basic_auth_headers("testadmin", "adminpass"),
+           follow_redirects=True)
+        assert resp.status_code == 200
+
+        cert = Certificate.query.filter_by(common_name="api-csr.example.com").first()
+        assert cert is not None
+        x509_cert = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        ku_ext = x509_cert.extensions.get_extension_for_class(x509.KeyUsage)
+        assert ku_ext.value.digital_signature is True
+        assert ku_ext.value.key_encipherment is True
