@@ -68,3 +68,12 @@ def auth_csr_user(client, csr_user):
         "password": "csrpass",
     })
     return client
+
+
+@pytest.fixture
+def inactive_user(db):
+    user = User(username="inactiveuser", role="admin", is_active_user=False)
+    user.set_password("inactivepass")
+    db.session.add(user)
+    db.session.commit()
+    return user
