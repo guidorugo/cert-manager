@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from flask import g
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -37,7 +38,31 @@ class User(UserMixin, db.Model):
     def __repr__(self):
         return f"<User {self.username}>"
 
+    @staticmethod
+    def authenticate_basic_auth(username, password):
+        """Validate Basic Auth credentials. Returns User or None.
+
+        Performs a dummy hash check for nonexistent users to prevent
+        timing-based username enumeration.
+        """
+        user = User.query.filter_by(username=username).first()
+        if user is None:
+            # Dummy check to prevent timing attacks revealing valid usernames
+            generate_password_hash("dummy-password")
+            return None
+        if not user.check_password(password):
+            return None
+        if not user.is_active:
+            return None
+        return user
+
 
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
+
+
+@login_manager.request_loader
+def load_user_from_request(request):
+    """Load user from Basic Auth header (set by before_request handler)."""
+    return getattr(g, "basic_auth_user", None)

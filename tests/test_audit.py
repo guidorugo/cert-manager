@@ -21,7 +21,8 @@ class TestAuditLogging:
         })
         entry = AuditLog.query.filter_by(action="login_failure").first()
         assert entry is not None
-        assert "nonexistent" in entry.details
+        # Unknown usernames are truncated to avoid logging passwords
+        assert "non***" in entry.details
 
     def test_logout_logged(self, auth_admin, admin_user, db):
         auth_admin.get("/auth/logout")
