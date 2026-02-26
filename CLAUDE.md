@@ -9,6 +9,7 @@ Handles CA creation, certificate signing/revocation, CSR management, CRL generat
 - Bootstrap 5 (CDN), Gunicorn, SQLite
 
 ## Project Structure
+- `.github/workflows/` - GitHub Actions CI (Docker build & push to GHCR)
 - `app/` - Flask application (factory pattern in `__init__.py`)
 - `app/models/` - SQLAlchemy models (User, CA, Certificate, CSR, AuditLog)
 - `app/services/` - Business logic (crypto_utils, ca_service, cert_service, csr_service, crl_service, ocsp_service, audit_service)
@@ -25,6 +26,12 @@ docker-compose up --build
 ```
 Requires `SECRET_KEY` and `MASTER_PASSPHRASE` env vars to be set (docker-compose will fail otherwise).
 
+### Pre-built image (GHCR)
+```bash
+docker pull ghcr.io/guidorugo/cert-manager:latest
+```
+Or switch `docker-compose.yml` to use `image:` instead of `build:` (see commented line).
+
 ### Local development
 ```bash
 pip install -r requirements.txt
@@ -36,6 +43,12 @@ flask --app "app:create_app()" run --debug
 pip install pytest
 python -m pytest tests/ -v
 ```
+
+## CI/CD
+- **GitHub Actions workflow**: `.github/workflows/docker-publish.yml`
+- **Triggers**: Push to `master` (builds + pushes `latest`), `v*` tags (pushes semver tags), PRs (build-only validation).
+- **Registry**: `ghcr.io/guidorugo/cert-manager` — uses `GITHUB_TOKEN`, no extra secrets needed.
+- **`.dockerignore`**: Excludes `venv/`, `tests/`, `.env`, `.git/`, etc. from the Docker build context.
 
 ## Key Design Decisions
 - **Private key encryption**: Fernet + PBKDF2-HMAC-SHA256 (600k iterations). Salt stored with ciphertext.
