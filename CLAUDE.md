@@ -22,9 +22,9 @@ Handles CA creation, certificate signing/revocation, CSR management, CRL generat
 
 ### Docker (production)
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
-Requires `SECRET_KEY` and `MASTER_PASSPHRASE` env vars to be set (docker-compose will fail otherwise).
+Requires `SECRET_KEY` and `MASTER_PASSPHRASE` env vars to be set (docker compose will fail otherwise).
 
 ### Pre-built image (GHCR)
 ```bash
