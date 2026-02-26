@@ -71,6 +71,24 @@ def auth_csr_user(client, csr_user):
 
 
 @pytest.fixture
+def csr_requester(db):
+    user = User(username="testrequester", role="csr_requester")
+    user.set_password("requesterpass")
+    db.session.add(user)
+    db.session.commit()
+    return user
+
+
+@pytest.fixture
+def auth_csr_requester(client, csr_requester):
+    client.post("/auth/login", data={
+        "username": "testrequester",
+        "password": "requesterpass",
+    })
+    return client
+
+
+@pytest.fixture
 def inactive_user(db):
     user = User(username="inactiveuser", role="admin", is_active_user=False)
     user.set_password("inactivepass")

@@ -29,6 +29,10 @@ class User(UserMixin, db.Model):
     def is_csr_user(self):
         return self.role == "csr_user"
 
+    @property
+    def is_csr_requester(self):
+        return self.role == "csr_requester"
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
