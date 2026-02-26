@@ -183,6 +183,14 @@ def _migrate_schema():
                 "ALTER TABLE certificate_authorities ADD COLUMN revocation_reason VARCHAR(50)"
             ))
 
+    # Migrate certificates table
+    if "certificates" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("certificates")}
+        if "requested_by" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificates ADD COLUMN requested_by INTEGER REFERENCES users(id)"
+            ))
+
     # Migrate certificate_signing_requests table
     if "certificate_signing_requests" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("certificate_signing_requests")}
@@ -190,6 +198,12 @@ def _migrate_schema():
             db.session.execute(text(
                 "ALTER TABLE certificate_signing_requests ADD COLUMN created_by INTEGER REFERENCES users(id)"
             ))
+
+    # Migrate csr_user role to csr_requester
+    if "users" in inspector.get_table_names():
+        db.session.execute(text(
+            "UPDATE users SET role = 'csr_requester' WHERE role = 'csr_user'"
+        ))
 
     db.session.commit()
 
