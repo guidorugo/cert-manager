@@ -40,18 +40,18 @@ def create():
         if not cn:
             flash("Common Name is required.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
             flash("CA not found.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
         if ca.is_revoked:
             flash("Cannot issue certificates from a revoked CA.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.all())
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
         subject_attrs = {
             "CN": cn, "O": org, "OU": ou,

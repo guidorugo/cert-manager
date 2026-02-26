@@ -39,7 +39,7 @@ def create():
             if not name:
                 flash("CA Name is required.", "danger")
                 return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.all())
+                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
             try:
                 cert_pem = _get_pem_input(request, "cert_pem", "cert_file")
@@ -47,16 +47,16 @@ def create():
             except ValueError as e:
                 flash(str(e), "danger")
                 return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.all())
+                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
             if not cert_pem:
                 flash("Certificate PEM is required.", "danger")
                 return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.all())
+                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
             if not key_pem:
                 flash("Private Key PEM is required.", "danger")
                 return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.all())
+                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
             upload_parent_id = request.form.get("upload_parent_id")
             parent_id = upload_parent_id if upload_parent_id else None
@@ -94,7 +94,7 @@ def create():
             if not name or not cn:
                 flash("Name and Common Name are required.", "danger")
                 return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.all())
+                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
 
             subject_attrs = {
                 "CN": cn, "O": org, "OU": ou,
@@ -108,7 +108,7 @@ def create():
                     if not parent_ca:
                         flash("Parent CA not found.", "danger")
                         return render_template("ca/create.html",
-                                               cas=CertificateAuthority.query.all())
+                                               cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
                     ca = ca_service.create_intermediate_ca(
                         name, parent_ca, subject_attrs, key_type, key_size,
                         validity_days, passphrase, path_length=path_length,
