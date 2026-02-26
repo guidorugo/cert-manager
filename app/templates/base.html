@@ -24,10 +24,10 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('ca.list_cas') }}">CAs</a>
                     </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('certificates.list_certs') }}">Certificates</a>
                     </li>
-                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('csr.list_csrs') }}">CSRs</a>
                     </li>
@@ -46,8 +46,6 @@
                             {{ current_user.username }}
                             {% if current_user.is_admin %}
                             <span class="badge bg-primary">Admin</span>
-                            {% elif current_user.is_csr_user %}
-                            <span class="badge bg-secondary">CSR User</span>
                             {% else %}
                             <span class="badge bg-info">CSR Requester</span>
                             {% endif %}

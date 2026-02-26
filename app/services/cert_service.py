@@ -207,6 +207,7 @@ def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
         san_json=json.dumps(effective_san) if effective_san else csr_model.san_json,
         key_usage_json=json.dumps(key_usage) if key_usage else None,
         extended_key_usage_json=json.dumps(extended_key_usage) if extended_key_usage else None,
+        requested_by=csr_model.created_by,
     )
     db.session.add(certificate)
     db.session.flush()

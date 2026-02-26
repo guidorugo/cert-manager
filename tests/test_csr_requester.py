@@ -47,10 +47,6 @@ class TestCSRRequesterRestrictions:
         resp = auth_csr_requester.get("/ca/", follow_redirects=True)
         assert b"do not have permission" in resp.data
 
-    def test_blocked_from_certificates(self, auth_csr_requester):
-        resp = auth_csr_requester.get("/certificates/", follow_redirects=True)
-        assert b"do not have permission" in resp.data
-
     def test_blocked_from_users(self, auth_csr_requester):
         resp = auth_csr_requester.get("/users/", follow_redirects=True)
         assert b"do not have permission" in resp.data
@@ -122,10 +118,17 @@ class TestCSRRequesterUserManagement:
         assert user is not None
         assert user.role == "csr_requester"
 
-    def test_admin_can_change_role_to_csr_requester(self, auth_admin, csr_user, db):
-        resp = auth_admin.post(f"/users/{csr_user.id}/edit", data={
+    def test_admin_can_change_role_to_csr_requester(self, auth_admin, admin_user, db):
+        # Create a second admin so we can demote one
+        from app.models.user import User
+        user2 = User(username="admin2", role="admin")
+        user2.set_password("pass2")
+        db.session.add(user2)
+        db.session.commit()
+
+        resp = auth_admin.post(f"/users/{user2.id}/edit", data={
             "role": "csr_requester",
         }, follow_redirects=True)
         assert b"updated" in resp.data.lower()
-        db.session.refresh(csr_user)
-        assert csr_user.role == "csr_requester"
+        db.session.refresh(user2)
+        assert user2.role == "csr_requester"

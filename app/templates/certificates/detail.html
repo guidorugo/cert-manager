@@ -12,7 +12,7 @@
             <a href="{{ url_for('certificates.download_key', cert_id=cert.id) }}" class="btn btn-sm btn-outline-warning">Key</a>
             {% endif %}
         </div>
-        {% if not cert.is_revoked %}
+        {% if current_user.is_admin and not cert.is_revoked %}
         <a href="{{ url_for('certificates.revoke', cert_id=cert.id) }}" class="btn btn-sm btn-danger ms-2">Revoke</a>
         {% endif %}
     </div>

@@ -132,8 +132,7 @@ curl -b cookies.txt http://localhost:5000/ca/
 | Role | Access |
 |------|--------|
 | `admin` | Full access: CAs, certificates, CSR signing/rejection, user management, audit log |
-| `csr_user` | Create/upload CSRs, view own CSRs, dashboard with own stats |
-| `csr_requester` | Create/upload CSRs, view own CSRs — intended for users who only submit certificate requests |
+| `csr_requester` | Create/upload CSRs, view own CSRs and certificates issued from them |
 
 ### Public Endpoints (no authentication)
 
@@ -256,7 +255,7 @@ python -m pytest tests/ -v
 ```
 Flask App Factory
 ├── Models (SQLAlchemy)
-│   ├── User            (roles: admin, csr_user)
+│   ├── User            (roles: admin, csr_requester)
 │   ├── CertificateAuthority
 │   ├── Certificate
 │   ├── CertificateSigningRequest
