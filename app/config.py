@@ -20,5 +20,8 @@ class Config:
     RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "false").lower() == "true"
     RATE_LIMIT_DEFAULT = os.environ.get("RATE_LIMIT_DEFAULT", "60/minute")
 
+    BASIC_AUTH_ENABLED = os.environ.get("BASIC_AUTH_ENABLED", "true").lower() == "true"
+    BASIC_AUTH_REALM = os.environ.get("BASIC_AUTH_REALM", "cert-manager")
+
     _INSECURE_SECRET_KEY = "dev-secret-key"
     _INSECURE_PASSPHRASE = "dev-passphrase"

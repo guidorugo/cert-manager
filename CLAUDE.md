@@ -77,6 +77,16 @@ python -m pytest tests/ -v
 - **Schema migration**: `_migrate_schema()` in `app/__init__.py` handles adding new columns to existing SQLite tables via ALTER TABLE.
 - **Last-admin guards**: Cannot deactivate or demote the last active admin user.
 
+## HTTP Basic Auth
+- **Alternative to session auth**: Enables programmatic access via `curl -u user:pass`, scripts, and automation.
+- **Stateless**: No session cookie created — each request authenticates independently.
+- **CSRF bypass**: CSRF validation is skipped only for requests with **valid** Basic Auth credentials.
+- **JSON error responses**: Basic Auth clients receive JSON `{"error": "..."}` for 401/403 instead of HTML redirects.
+- **Audit logged**: Both success (`basic_auth_success`) and failure (`basic_auth_failed`) are logged.
+- **Config**: `BASIC_AUTH_ENABLED` (default: true), `BASIC_AUTH_REALM` (default: "cert-manager").
+- **HTTPS required in production**: Basic Auth sends credentials Base64-encoded (not encrypted).
+- **Usage**: `curl -u admin:password https://host/ca/` or `curl -H "Authorization: Basic $(echo -n user:pass | base64)" https://host/ca/`.
+
 ## Environment Variables
 - `SECRET_KEY` - Flask secret key
 - `MASTER_PASSPHRASE` - Master passphrase for key encryption
@@ -86,3 +96,5 @@ python -m pytest tests/ -v
 - `SESSION_LIFETIME_MINUTES` - Session timeout in minutes (default: 30)
 - `RATE_LIMIT_ENABLED` - Enable rate limiting (default: false, requires Flask-Limiter)
 - `RATE_LIMIT_DEFAULT` - Default rate limit when enabled (default: 60/minute)
+- `BASIC_AUTH_ENABLED` - Enable HTTP Basic Auth (default: true)
+- `BASIC_AUTH_REALM` - Basic Auth realm name (default: cert-manager)
