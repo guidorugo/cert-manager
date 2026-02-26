@@ -23,8 +23,8 @@ class TestBasicAuthSuccess:
         resp = client.get("/ca/", headers=_basic_auth_headers("testadmin", "adminpass"))
         assert resp.status_code == 200
 
-    def test_csr_user_access_own_routes(self, client, csr_user):
-        resp = client.get("/csr/", headers=_basic_auth_headers("testcsruser", "csrpass"))
+    def test_csr_requester_access_own_routes(self, client, csr_requester):
+        resp = client.get("/csr/", headers=_basic_auth_headers("testrequester", "requesterpass"))
         assert resp.status_code == 200
 
     def test_post_without_csrf_token(self, app, admin_user):
@@ -82,16 +82,16 @@ class TestBasicAuthFailure:
 # --- RBAC ---
 
 class TestBasicAuthRBAC:
-    def test_csr_user_forbidden_on_admin_route(self, client, csr_user):
-        resp = client.get("/ca/", headers=_basic_auth_headers("testcsruser", "csrpass"))
+    def test_csr_requester_forbidden_on_admin_route(self, client, csr_requester):
+        resp = client.get("/ca/", headers=_basic_auth_headers("testrequester", "requesterpass"))
         assert resp.status_code == 403
         data = json.loads(resp.data)
         assert "error" in data
 
-    def test_admin_required_returns_json_for_basic_auth(self, client, csr_user):
+    def test_admin_required_returns_json_for_basic_auth(self, client, csr_requester):
         resp = client.get(
             "/users/audit-log",
-            headers=_basic_auth_headers("testcsruser", "csrpass"),
+            headers=_basic_auth_headers("testrequester", "requesterpass"),
         )
         assert resp.status_code == 403
         data = json.loads(resp.data)

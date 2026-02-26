@@ -26,10 +26,6 @@ class User(UserMixin, db.Model):
         return self.role == "admin"
 
     @property
-    def is_csr_user(self):
-        return self.role == "csr_user"
-
-    @property
     def is_csr_requester(self):
         return self.role == "csr_requester"
 

@@ -23,7 +23,10 @@ class Certificate(db.Model):
     is_revoked = db.Column(db.Boolean, default=False)
     revoked_at = db.Column(db.DateTime, nullable=True)
     revocation_reason = db.Column(db.String(50), nullable=True)
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    requester = db.relationship("User", backref="certificates", foreign_keys=[requested_by])
 
     def __repr__(self):
         return f"<Certificate {self.common_name} ({self.serial_number})>"
