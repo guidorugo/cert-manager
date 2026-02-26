@@ -46,8 +46,10 @@
                             {{ current_user.username }}
                             {% if current_user.is_admin %}
                             <span class="badge bg-primary">Admin</span>
-                            {% else %}
+                            {% elif current_user.is_csr_user %}
                             <span class="badge bg-secondary">CSR User</span>
+                            {% else %}
+                            <span class="badge bg-info">CSR Requester</span>
                             {% endif %}
                         </span>
                     </li>

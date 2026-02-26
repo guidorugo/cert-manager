@@ -132,7 +132,8 @@ curl -b cookies.txt http://localhost:5000/ca/
 | Role | Access |
 |------|--------|
 | `admin` | Full access: CAs, certificates, CSR signing/rejection, user management, audit log |
-| `csr_user` | Limited access: create/upload CSRs, view own CSRs, dashboard with own stats |
+| `csr_user` | Create/upload CSRs, view own CSRs, dashboard with own stats |
+| `csr_requester` | Create/upload CSRs, view own CSRs — intended for users who only submit certificate requests |
 
 ### Public Endpoints (no authentication)
 
