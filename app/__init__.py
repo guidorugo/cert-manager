@@ -1,7 +1,7 @@
 import os
 import sys
 
-from flask import Flask, session
+from flask import Flask, g, jsonify, request, session
 
 from .config import Config
 from .extensions import db, login_manager, csrf
@@ -13,6 +13,7 @@ def create_app(config_class=Config):
 
     db.init_app(app)
     login_manager.init_app(app)
+    _setup_basic_auth(app)
     csrf.init_app(app)
 
     _check_security(app)
@@ -42,6 +43,62 @@ def create_app(config_class=Config):
         _create_default_admin(app)
 
     return app
+
+
+def _setup_basic_auth(app):
+    """Configure HTTP Basic Auth via before_request + unauthorized_handler."""
+
+    @app.before_request
+    def check_basic_auth():
+        g.basic_auth_used = False
+        g.basic_auth_user = None
+
+        if not app.config.get("BASIC_AUTH_ENABLED", True):
+            return
+
+        auth = request.authorization
+        if auth is None or auth.type != "basic":
+            return
+
+        from .models.user import User
+        user = User.authenticate_basic_auth(auth.username, auth.password)
+
+        if user is None:
+            from .services.audit_service import log_action, sanitize_username_for_log
+            log_action(
+                "basic_auth_failed",
+                target_type="user",
+                details={"username": sanitize_username_for_log(auth.username), "auth_method": "basic_auth"},
+            )
+            db.session.commit()
+            return
+
+        g.basic_auth_used = True
+        g.basic_auth_user = user
+
+        from .services.audit_service import log_action
+        log_action(
+            "basic_auth_success",
+            target_type="user",
+            target_id=user.id,
+            details={"username": user.username, "auth_method": "basic_auth"},
+        )
+        db.session.commit()
+
+    @login_manager.unauthorized_handler
+    def handle_unauthorized():
+        if app.config.get("BASIC_AUTH_ENABLED", True) and request.authorization is not None:
+            realm = app.config.get("BASIC_AUTH_REALM", "cert-manager")
+            response = jsonify({"error": "Invalid credentials."})
+            response.status_code = 401
+            response.headers["WWW-Authenticate"] = f'Basic realm="{realm}"'
+            return response
+        return app.login_manager.login_view and _redirect_to_login() or ("Unauthorized", 401)
+
+    def _redirect_to_login():
+        from flask import flash, redirect, url_for
+        flash("Please log in to access this page.", "warning")
+        return redirect(url_for(login_manager.login_view, next=request.url))
 
 
 def _check_security(app):
