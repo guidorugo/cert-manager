@@ -21,6 +21,9 @@ class CertificateAuthority(db.Model):
     path_length = db.Column(db.Integer, nullable=True)
     crl_number = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    is_revoked = db.Column(db.Boolean, default=False)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+    revocation_reason = db.Column(db.String(50), nullable=True)
 
     parent = db.relationship("CertificateAuthority", remote_side=[id], backref="children")
     certificates = db.relationship("Certificate", backref="ca", lazy="dynamic")
