@@ -1,4 +1,5 @@
 import json
+import re
 
 from flask import (
     Blueprint, render_template, redirect, url_for, flash,
@@ -11,6 +12,12 @@ from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.certificate import Certificate
 from ..services import cert_service, crl_service, audit_service
+
+
+def _safe_filename(name, extension):
+    """Sanitize user-provided name for Content-Disposition header."""
+    safe = re.sub(r'[^\w.\-]', '_', name)
+    return f'attachment; filename="{safe}.{extension}"'
 
 certificates_bp = Blueprint("certificates", __name__, url_prefix="/certificates")
 
@@ -31,7 +38,6 @@ def list_certs():
 @admin_required
 def create():
     if request.method == "POST":
-        ca_id = int(request.form.get("ca_id"))
         cn = request.form.get("cn", "").strip()
         org = request.form.get("org", "").strip()
         ou = request.form.get("ou", "").strip()
@@ -39,8 +45,15 @@ def create():
         state = request.form.get("state", "").strip()
         locality = request.form.get("locality", "").strip()
         key_type = request.form.get("key_type", "RSA")
-        key_size = int(request.form.get("key_size", "2048"))
-        validity_days = int(request.form.get("validity_days", "365"))
+
+        try:
+            ca_id = int(request.form.get("ca_id"))
+            key_size = int(request.form.get("key_size", "2048"))
+            validity_days = int(request.form.get("validity_days", "365"))
+        except (ValueError, TypeError):
+            flash("CA ID, key size, and validity days must be valid numbers.", "danger")
+            return render_template("certificates/create.html",
+                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
         san_raw = request.form.get("san", "").strip()
 
         if not cn:
@@ -68,7 +81,8 @@ def create():
 
         # Build OCSP URL
         server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
-        ocsp_url = f"http://{server}/public/ocsp/{ca_id}"
+        scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
+        ocsp_url = f"{scheme}://{server}/public/ocsp/{ca_id}"
 
         try:
             certificate = cert_service.create_certificate(
@@ -148,7 +162,7 @@ def download(cert_id):
         return Response(
             data,
             mimetype="application/x-x509-ca-cert",
-            headers={"Content-Disposition": f"attachment; filename={certificate.common_name}.der"},
+            headers={"Content-Disposition": _safe_filename(certificate.common_name, "der")},
         )
     elif fmt == "pkcs12":
         passphrase = current_app.config["MASTER_PASSPHRASE"]
@@ -158,7 +172,7 @@ def download(cert_id):
             return Response(
                 data,
                 mimetype="application/x-pkcs12",
-                headers={"Content-Disposition": f"attachment; filename={certificate.common_name}.p12"},
+                headers={"Content-Disposition": _safe_filename(certificate.common_name, "p12")},
             )
         except ValueError as e:
             flash(str(e), "danger")
@@ -168,7 +182,7 @@ def download(cert_id):
         return Response(
             data,
             mimetype="application/x-pem-file",
-            headers={"Content-Disposition": f"attachment; filename={certificate.common_name}.pem"},
+            headers={"Content-Disposition": _safe_filename(certificate.common_name, "pem")},
         )
 
 
@@ -199,5 +213,5 @@ def download_key(cert_id):
     return Response(
         key_pem,
         mimetype="application/x-pem-file",
-        headers={"Content-Disposition": f"attachment; filename={certificate.common_name}.key"},
+        headers={"Content-Disposition": _safe_filename(certificate.common_name, "key")},
     )

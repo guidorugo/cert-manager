@@ -1,8 +1,16 @@
+import re
+
 from flask import Blueprint, Response, current_app, request
 
 from ..extensions import db, csrf
 from ..models.ca import CertificateAuthority
 from ..services import crl_service, ocsp_service
+
+
+def _safe_filename(name, extension):
+    """Sanitize user-provided name for Content-Disposition header."""
+    safe = re.sub(r'[^\w.\-]', '_', name)
+    return f'attachment; filename="{safe}.{extension}"'
 
 public_bp = Blueprint("public", __name__, url_prefix="/public")
 
@@ -19,10 +27,11 @@ def download_crl_der(ca_id):
         return Response(
             crl_der,
             mimetype="application/pkix-crl",
-            headers={"Content-Disposition": f"attachment; filename={ca.name}.crl"},
+            headers={"Content-Disposition": _safe_filename(ca.name, "crl")},
         )
-    except Exception as e:
-        return f"Error generating CRL: {e}", 500
+    except Exception:
+        current_app.logger.exception("Error generating CRL (DER)")
+        return "Internal server error", 500
 
 
 @public_bp.route("/crl/<int:ca_id>.pem")
@@ -37,10 +46,11 @@ def download_crl_pem(ca_id):
         return Response(
             crl_pem,
             mimetype="application/x-pem-file",
-            headers={"Content-Disposition": f"attachment; filename={ca.name}.crl.pem"},
+            headers={"Content-Disposition": _safe_filename(ca.name, "crl.pem")},
         )
-    except Exception as e:
-        return f"Error generating CRL: {e}", 500
+    except Exception:
+        current_app.logger.exception("Error generating CRL (PEM)")
+        return "Internal server error", 500
 
 
 @public_bp.route("/ca/<int:ca_id>.crt")
@@ -52,7 +62,7 @@ def download_ca_cert(ca_id):
     return Response(
         ca.certificate_pem,
         mimetype="application/x-pem-file",
-        headers={"Content-Disposition": f"attachment; filename={ca.name}.crt"},
+        headers={"Content-Disposition": _safe_filename(ca.name, "crt")},
     )
 
 
@@ -69,5 +79,6 @@ def ocsp_responder(ca_id):
     try:
         response_der = ocsp_service.build_ocsp_response(ocsp_request_der, ca, passphrase)
         return Response(response_der, mimetype="application/ocsp-response")
-    except Exception as e:
-        return f"OCSP error: {e}", 500
+    except Exception:
+        current_app.logger.exception("OCSP responder error")
+        return "Internal server error", 500
