@@ -6,7 +6,8 @@ A web-based X.509 Certificate Authority management application built with Python
 
 - **CA Management**: Create root and intermediate Certificate Authorities with RSA or EC keys
 - **Certificate Issuance**: Generate certificates with SANs, key usage, extended key usage, and CRL Distribution Points
-- **Advanced Certificate Settings**: Collapsible UI with certificate profile presets (Web Server, Client Auth, Email/S-MIME, Code Signing), Key Usage and Extended Key Usage checkboxes, and auto-populated CRL Distribution Points
+- **Certificate Detail View**: Full certificate details including Key Usage, Extended Key Usage, subject DN fields, requester, and SANs
+- **Advanced Certificate Settings**: Collapsible UI with certificate profile presets (Web Server, Client Auth, Email/S-MIME, Code Signing), Key Usage and Extended Key Usage checkboxes, and editable CRL Distribution Points (auto-populated from hostname, user-overridable)
 - **CSR Management**: Create or import Certificate Signing Requests, sign or reject them
 - **Revocation**: Revoke certificates with standard reasons, generate CRLs
 - **OCSP Responder**: Built-in OCSP endpoint for real-time certificate status checks
@@ -68,7 +69,7 @@ Go to **CAs > Create CA**, fill in the subject details, choose key type (RSA 204
 
 ### 2. Issue a Certificate
 
-Go to **Certificates > Create Certificate**, select the issuing CA, fill in subject and SANs. Expand **Advanced Settings** to choose a certificate profile (Web Server, Client Auth, Email/S-MIME, Code Signing) or manually configure Key Usage and Extended Key Usage. CRL Distribution Points are auto-populated based on the selected CA.
+Go to **Certificates > Create Certificate**, select the issuing CA, fill in subject and SANs. Expand **Advanced Settings** to choose a certificate profile (Web Server, Client Auth, Email/S-MIME, Code Signing) or manually configure Key Usage and Extended Key Usage. CRL Distribution Points are auto-populated based on the selected CA and can be manually overridden. The hostname is auto-detected from the browser request when `SERVER_NAME_FOR_OCSP` is not explicitly set.
 
 ### 3. Manage CSRs
 
@@ -244,7 +245,7 @@ python -m pytest tests/ -v
 | `DATABASE_URL` | `sqlite:///cert-manager.db` | Database URI |
 | `ADMIN_USERNAME` | `admin` | Default admin username |
 | `ADMIN_PASSWORD` | `admin` | Default admin password |
-| `SERVER_NAME_FOR_OCSP` | `localhost:5000` | Server hostname for OCSP AIA URLs |
+| `SERVER_NAME_FOR_OCSP` | `localhost:5000` | Server hostname for OCSP/CRL URLs. When at default, auto-detected from request |
 | `SESSION_LIFETIME_MINUTES` | `30` | Session timeout in minutes |
 | `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting (requires Flask-Limiter) |
 | `RATE_LIMIT_DEFAULT` | `60/minute` | Default rate limit when enabled |
