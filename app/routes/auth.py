@@ -1,5 +1,3 @@
-from urllib.parse import urlparse
-
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash
@@ -14,8 +12,8 @@ def _is_safe_url(target):
     """Reject absolute URLs that redirect off-site."""
     if not target:
         return False
-    parsed = urlparse(target)
-    return not parsed.netloc
+    # Only allow paths starting with a single / (reject // protocol-relative URLs)
+    return target.startswith("/") and not target.startswith("//")
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 

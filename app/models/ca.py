@@ -20,6 +20,7 @@ class CertificateAuthority(db.Model):
     not_after = db.Column(db.DateTime, nullable=False)
     path_length = db.Column(db.Integer, nullable=True)
     crl_number = db.Column(db.Integer, default=0)
+    crl_pem = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     is_revoked = db.Column(db.Boolean, default=False)
     revoked_at = db.Column(db.DateTime, nullable=True)
