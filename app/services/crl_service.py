@@ -117,15 +117,23 @@ def generate_crl(ca, passphrase, validity_days=7):
         builder = builder.add_revoked_certificate(revoked_builder.build())
 
     crl = builder.sign(ca_key, hashes.SHA256())
+
+    # Cache the CRL on the CA for public download
+    ca.crl_pem = crl.public_bytes(serialization.Encoding.PEM).decode()
     db.session.commit()
     return crl
 
 
 def get_crl_pem(ca, passphrase):
+    if ca.crl_pem:
+        return ca.crl_pem.encode()
     crl = generate_crl(ca, passphrase)
     return crl.public_bytes(serialization.Encoding.PEM)
 
 
 def get_crl_der(ca, passphrase):
+    if ca.crl_pem:
+        crl = x509.load_pem_x509_crl(ca.crl_pem.encode())
+        return crl.public_bytes(serialization.Encoding.DER)
     crl = generate_crl(ca, passphrase)
     return crl.public_bytes(serialization.Encoding.DER)
