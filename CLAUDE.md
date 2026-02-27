@@ -54,7 +54,7 @@ python -m pytest tests/ -v
 - **Private key encryption**: Fernet + PBKDF2-HMAC-SHA256 (600k iterations). Salt stored with ciphertext.
 - **Master passphrase**: From `MASTER_PASSPHRASE` env var. Used for all key encrypt/decrypt.
 - **OCSP**: Built-in responder at `/public/ocsp/<ca_id>`. Certificates include AIA extension.
-- **CRL Distribution Points**: Auto-populated in certificates using `{scheme}://{server}/public/crl/{ca_id}.crl`. Added via `crl_dp_url` parameter in `cert_service.create_certificate()` and `cert_service.sign_csr()`.
+- **CRL Distribution Points**: Auto-populated in certificates using `{scheme}://{server}/public/crl/{ca_id}.crl`. Added via `crl_dp_url` parameter in `cert_service.create_certificate()` and `cert_service.sign_csr()`. The CRL DP field in the create/sign forms is **editable** — users can override the auto-generated URL per-certificate. When `SERVER_NAME_FOR_OCSP` is at its default `localhost:5000`, the hostname is **auto-detected from `request.host`**. A warning banner appears in Advanced Settings when the detected hostname contains `localhost`.
 - **Certificate profiles**: Both certificate creation and CSR signing forms have a collapsible Advanced Settings section with profile presets (Web Server, Client Auth, Email/S-MIME, Code Signing, Custom) that configure Key Usage and Extended Key Usage checkboxes. Default profile (Web Server) matches previous hardcoded defaults for backward compatibility.
 - **Public endpoints**: CRL download and CA cert download require no auth.
 - **Database**: SQLite, stored in `./data/` (Docker volume).
@@ -100,7 +100,7 @@ python -m pytest tests/ -v
 - `MASTER_PASSPHRASE` - Master passphrase for key encryption
 - `DATABASE_URL` - SQLAlchemy database URI
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` - Default admin credentials
-- `SERVER_NAME_FOR_OCSP` - Hostname for OCSP AIA URLs (default: localhost:5000)
+- `SERVER_NAME_FOR_OCSP` - Hostname for OCSP/CRL URLs (default: localhost:5000). When at default, auto-detected from `request.host`
 - `SESSION_LIFETIME_MINUTES` - Session timeout in minutes (default: 30)
 - `RATE_LIMIT_ENABLED` - Enable rate limiting (default: false, requires Flask-Limiter)
 - `RATE_LIMIT_DEFAULT` - Default rate limit when enabled (default: 60/minute)
