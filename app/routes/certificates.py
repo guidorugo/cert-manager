@@ -50,6 +50,8 @@ def create():
         key_type = request.form.get("key_type", "RSA")
 
         ocsp_server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+        if ocsp_server == "localhost:5000":
+            ocsp_server = request.host
         ocsp_scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
 
         try:
@@ -91,7 +93,9 @@ def create():
 
         # Build OCSP URL and CRL DP URL
         ocsp_url = f"{ocsp_scheme}://{ocsp_server}/public/ocsp/{ca_id}"
-        crl_dp_url = f"{ocsp_scheme}://{ocsp_server}/public/crl/{ca_id}.crl"
+        crl_dp_url = request.form.get("crl_dp_url", "").strip()
+        if not crl_dp_url:
+            crl_dp_url = f"{ocsp_scheme}://{ocsp_server}/public/crl/{ca_id}.crl"
 
         # Parse Key Usage and Extended Key Usage from checkboxes
         # If no ku_* fields are present at all (e.g. API call), use service defaults
@@ -142,6 +146,8 @@ def create():
 
     cas = CertificateAuthority.query.all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+    if server == "localhost:5000":
+        server = request.host
     scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
     return render_template("certificates/create.html", cas=cas,
                            ocsp_scheme=scheme, ocsp_server=server)
@@ -160,7 +166,26 @@ def detail(cert_id):
         return redirect(url_for("certificates.list_certs"))
 
     san_list = json.loads(certificate.san_json) if certificate.san_json else []
-    return render_template("certificates/detail.html", cert=certificate, san_list=san_list)
+
+    subject = json.loads(certificate.subject_json) if certificate.subject_json else {}
+
+    if certificate.key_usage_json:
+        key_usage = json.loads(certificate.key_usage_json)
+    else:
+        key_usage = {
+            "digital_signature": True, "key_encipherment": True,
+            "content_commitment": False, "data_encipherment": False,
+            "key_agreement": False,
+        }
+
+    if certificate.extended_key_usage_json:
+        extended_key_usage = json.loads(certificate.extended_key_usage_json)
+    else:
+        extended_key_usage = ["serverAuth", "clientAuth"]
+
+    return render_template("certificates/detail.html", cert=certificate,
+                           san_list=san_list, subject=subject,
+                           key_usage=key_usage, extended_key_usage=extended_key_usage)
 
 
 @certificates_bp.route("/<int:cert_id>/revoke", methods=["GET", "POST"])

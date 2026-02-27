@@ -132,6 +132,8 @@ def sign(csr_id):
 
     if request.method == "POST":
         ocsp_server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+        if ocsp_server == "localhost:5000":
+            ocsp_server = request.host
         ocsp_scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
 
         try:
@@ -159,7 +161,9 @@ def sign(csr_id):
         passphrase = current_app.config["MASTER_PASSPHRASE"]
 
         ocsp_url = f"{ocsp_scheme}://{ocsp_server}/public/ocsp/{ca_id}"
-        crl_dp_url = f"{ocsp_scheme}://{ocsp_server}/public/crl/{ca_id}.crl"
+        crl_dp_url = request.form.get("crl_dp_url", "").strip()
+        if not crl_dp_url:
+            crl_dp_url = f"{ocsp_scheme}://{ocsp_server}/public/crl/{ca_id}.crl"
 
         # Parse Key Usage and Extended Key Usage from checkboxes
         # If no ku_* fields are present at all (e.g. API call), use service defaults
@@ -210,6 +214,8 @@ def sign(csr_id):
 
     cas = CertificateAuthority.query.all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+    if server == "localhost:5000":
+        server = request.host
     scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
     return render_template("csr/sign.html", csr=csr_model, cas=cas,
                            ocsp_scheme=scheme, ocsp_server=server)

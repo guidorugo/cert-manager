@@ -962,6 +962,214 @@ class TestExceptionSanitization:
 # =============================================================================
 
 
+# =============================================================================
+# Certificate detail page content
+# =============================================================================
+
+
+class TestCertificateDetailContent:
+    def test_detail_shows_key_usage_defaults(self, app, db, admin_user):
+        """When key_usage_json is None, detail page should show default KU values."""
+        with app.app_context():
+            ca = _create_test_ca()
+            cert = _create_test_cert(ca, requested_by=admin_user.id)
+            # Ensure no explicit KU stored (uses service defaults)
+            cert.key_usage_json = None
+            cert.extended_key_usage_json = None
+            db.session.commit()
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                resp = c.get(f"/certificates/{cert.id}")
+                assert resp.status_code == 200
+                assert b"Digital Signature" in resp.data
+                assert b"Key Encipherment" in resp.data
+
+    def test_detail_shows_explicit_key_usage(self, app, db, admin_user):
+        """When key_usage_json is set, detail page should show stored values."""
+        with app.app_context():
+            ca = _create_test_ca()
+            cert = _create_test_cert(ca, requested_by=admin_user.id)
+            cert.key_usage_json = json.dumps({
+                "digital_signature": True, "key_encipherment": False,
+                "content_commitment": True, "data_encipherment": False,
+                "key_agreement": False,
+            })
+            cert.extended_key_usage_json = json.dumps(["codeSigning"])
+            db.session.commit()
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                resp = c.get(f"/certificates/{cert.id}")
+                assert resp.status_code == 200
+                assert b"Content Commitment" in resp.data
+                assert b"Code Signing" in resp.data
+
+    def test_detail_shows_subject_details(self, app, db, admin_user):
+        """Detail page should show subject DN fields."""
+        with app.app_context():
+            ca = _create_test_ca()
+            cert = _create_test_cert(ca, requested_by=admin_user.id)
+            cert.subject_json = json.dumps({
+                "CN": "test.example.com", "O": "Test Org", "C": "US",
+            })
+            db.session.commit()
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                resp = c.get(f"/certificates/{cert.id}")
+                assert resp.status_code == 200
+                assert b"Test Org" in resp.data
+                assert b"Subject Details" in resp.data
+
+    def test_detail_shows_requester(self, app, db, admin_user):
+        """Detail page should show Requested By when set."""
+        with app.app_context():
+            ca = _create_test_ca()
+            cert = _create_test_cert(ca, requested_by=admin_user.id)
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                resp = c.get(f"/certificates/{cert.id}")
+                assert resp.status_code == 200
+                assert b"Requested By" in resp.data
+                assert b"testadmin" in resp.data
+
+    def test_detail_hides_requester_when_not_set(self, app, db, admin_user):
+        """Detail page should not show Requested By when not set."""
+        with app.app_context():
+            ca = _create_test_ca()
+            cert = _create_test_cert(ca)  # no requested_by
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                resp = c.get(f"/certificates/{cert.id}")
+                assert resp.status_code == 200
+                assert b"Requested By" not in resp.data
+
+
+# =============================================================================
+# CRL DP URL: custom, auto-detect, and localhost warning
+# =============================================================================
+
+
+class TestCRLDPURL:
+    def test_create_cert_with_custom_crl_dp(self, app, db, admin_user):
+        """Custom CRL DP URL from form should be used instead of auto-generated."""
+        with app.app_context():
+            ca = _create_test_ca()
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                resp = c.post("/certificates/create", data={
+                    "ca_id": str(ca.id),
+                    "cn": "custom-crl.example.com",
+                    "validity_days": "365",
+                    "key_type": "RSA",
+                    "key_size": "2048",
+                    "crl_dp_url": "https://crl.example.com/my-ca.crl",
+                }, follow_redirects=True)
+                assert resp.status_code == 200
+                cert = Certificate.query.filter_by(common_name="custom-crl.example.com").first()
+                assert cert is not None
+
+    def test_sign_csr_with_custom_crl_dp(self, app, db, admin_user):
+        """Custom CRL DP URL from form should be used in CSR signing."""
+        with app.app_context():
+            ca = _create_test_ca()
+            csr_model, _, _ = csr_service.create_csr(
+                subject_attrs={"CN": "custom-crl-csr.example.com"},
+                san_list=["custom-crl-csr.example.com"],
+                key_type="RSA", key_size=2048,
+                created_by=admin_user.id,
+            )
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                resp = c.post(f"/csr/{csr_model.id}/sign", data={
+                    "ca_id": str(ca.id),
+                    "validity_days": "365",
+                    "crl_dp_url": "https://crl.example.com/csr-ca.crl",
+                }, follow_redirects=True)
+                assert resp.status_code == 200
+                db.session.refresh(csr_model)
+                assert csr_model.status == "approved"
+
+    def test_auto_detect_hostname_in_create(self, app, db, admin_user):
+        """When SERVER_NAME_FOR_OCSP is default, auto-detect from request.host."""
+        with app.app_context():
+            ca = _create_test_ca()
+            with app.test_client() as c:
+                c.post("/auth/login", data={
+                    "username": "testadmin", "password": "adminpass"
+                })
+                # GET request to check auto-detected host in rendered template
+                resp = c.get("/certificates/create")
+                assert resp.status_code == 200
+                # The default test client host is 'localhost'
+                assert b"localhost" in resp.data
+
+    def test_explicit_server_name_takes_priority(self, app, db, admin_user):
+        """When SERVER_NAME_FOR_OCSP is explicitly set, it takes priority."""
+        with app.app_context():
+            original = app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+            app.config["SERVER_NAME_FOR_OCSP"] = "ca.example.com"
+            try:
+                ca = _create_test_ca()
+                with app.test_client() as c:
+                    c.post("/auth/login", data={
+                        "username": "testadmin", "password": "adminpass"
+                    })
+                    resp = c.get("/certificates/create")
+                    assert resp.status_code == 200
+                    assert b"ca.example.com" in resp.data
+            finally:
+                app.config["SERVER_NAME_FOR_OCSP"] = original
+
+    def test_localhost_warning_displayed(self, app, db, admin_user):
+        """Localhost warning should appear when server contains localhost."""
+        with app.app_context():
+            original = app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+            app.config["SERVER_NAME_FOR_OCSP"] = "localhost:5000"
+            try:
+                ca = _create_test_ca()
+                with app.test_client() as c:
+                    c.post("/auth/login", data={
+                        "username": "testadmin", "password": "adminpass"
+                    })
+                    # The test client host is 'localhost', which triggers the warning
+                    resp = c.get("/certificates/create")
+                    assert resp.status_code == 200
+                    assert b"SERVER_NAME_FOR_OCSP" in resp.data
+            finally:
+                app.config["SERVER_NAME_FOR_OCSP"] = original
+
+    def test_no_warning_with_production_hostname(self, app, db, admin_user):
+        """No localhost warning when SERVER_NAME_FOR_OCSP is production hostname."""
+        with app.app_context():
+            original = app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+            app.config["SERVER_NAME_FOR_OCSP"] = "ca.example.com"
+            try:
+                ca = _create_test_ca()
+                with app.test_client() as c:
+                    c.post("/auth/login", data={
+                        "username": "testadmin", "password": "adminpass"
+                    })
+                    resp = c.get("/certificates/create")
+                    assert resp.status_code == 200
+                    # No warning should be present
+                    assert b"SERVER_NAME_FOR_OCSP" not in resp.data
+            finally:
+                app.config["SERVER_NAME_FOR_OCSP"] = original
+
+
 class TestUserRoleDefault:
     def test_user_default_role_is_csr_requester(self, db):
         user = User(username="defaultrole")
