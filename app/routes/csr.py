@@ -1,4 +1,5 @@
 import json
+import logging
 
 from flask import (
     Blueprint, render_template, redirect, url_for, flash,
@@ -11,6 +12,8 @@ from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.csr import CertificateSigningRequest
 from ..services import csr_service, cert_service, audit_service
+
+logger = logging.getLogger(__name__)
 
 csr_bp = Blueprint("csr", __name__, url_prefix="/csr")
 
@@ -47,7 +50,8 @@ def create():
                 flash(f"CSR for '{csr_model.common_name}' imported.", "success")
                 return redirect(url_for("csr.detail", csr_id=csr_model.id))
             except Exception as e:
-                flash(f"Error importing CSR: {e}", "danger")
+                logger.exception("Error importing CSR")
+                flash("An unexpected error occurred while importing the CSR.", "danger")
         else:
             cn = request.form.get("cn", "").strip()
             org = request.form.get("org", "").strip()
@@ -92,7 +96,8 @@ def create():
                     key_pem=key_pem.decode() if key_pem else None,
                 )
             except Exception as e:
-                flash(f"Error creating CSR: {e}", "danger")
+                logger.exception("Error creating CSR")
+                flash("An unexpected error occurred while creating the CSR.", "danger")
 
     return render_template("csr/create.html")
 
@@ -200,7 +205,8 @@ def sign(csr_id):
             flash(f"Certificate '{certificate.common_name}' issued.", "success")
             return redirect(url_for("certificates.detail", cert_id=certificate.id))
         except Exception as e:
-            flash(f"Error signing CSR: {e}", "danger")
+            logger.exception("Error signing CSR")
+            flash("An unexpected error occurred while signing the CSR.", "danger")
 
     cas = CertificateAuthority.query.all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
