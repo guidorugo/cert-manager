@@ -43,7 +43,7 @@ def _get_hash_algorithm(key):
 
 
 def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passphrase,
-                   path_length=None, ocsp_url=None):
+                   path_length=None):
     key = _generate_key(key_type, key_size)
     subject = _build_subject(subject_attrs)
 
@@ -110,7 +110,7 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
 
 
 def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
-                           validity_days, passphrase, path_length=None, ocsp_url=None):
+                           validity_days, passphrase, path_length=None):
     key = _generate_key(key_type, key_size)
     subject = _build_subject(subject_attrs)
     parent_cert = x509.load_pem_x509_certificate(parent_ca.certificate_pem.encode())
