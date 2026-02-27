@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -6,6 +6,20 @@ from cryptography.x509 import ocsp
 
 from ..models.certificate import Certificate
 from .crypto_utils import decrypt_private_key
+
+OCSP_RESPONSE_VALIDITY_HOURS = 24
+
+_REVOCATION_REASONS = {
+    "unspecified": x509.ReasonFlags.unspecified,
+    "key_compromise": x509.ReasonFlags.key_compromise,
+    "ca_compromise": x509.ReasonFlags.ca_compromise,
+    "affiliation_changed": x509.ReasonFlags.affiliation_changed,
+    "superseded": x509.ReasonFlags.superseded,
+    "cessation_of_operation": x509.ReasonFlags.cessation_of_operation,
+    "certificate_hold": x509.ReasonFlags.certificate_hold,
+    "privilege_withdrawn": x509.ReasonFlags.privilege_withdrawn,
+    "aa_compromise": x509.ReasonFlags.aa_compromise,
+}
 
 
 def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
@@ -21,9 +35,9 @@ def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
     ).first()
 
     now = datetime.now(timezone.utc)
+    next_update = now + timedelta(hours=OCSP_RESPONSE_VALIDITY_HOURS)
 
     if certificate is None:
-        # Unknown certificate
         response = ocsp.OCSPResponseBuilder().build_unsuccessful(
             ocsp.OCSPResponseStatus.UNAUTHORIZED
         )
@@ -33,15 +47,18 @@ def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
 
     if certificate.is_revoked:
         revocation_time = certificate.revoked_at or now
+        reason = _REVOCATION_REASONS.get(
+            certificate.revocation_reason, x509.ReasonFlags.unspecified
+        )
         builder = ocsp.OCSPResponseBuilder().add_response(
             cert=cert_obj,
             issuer=ca_cert,
             algorithm=hashes.SHA256(),
             cert_status=ocsp.OCSPCertStatus.REVOKED,
             this_update=now,
-            next_update=None,
+            next_update=next_update,
             revocation_time=revocation_time,
-            revocation_reason=None,
+            revocation_reason=reason,
         ).responder_id(ocsp.OCSPResponderEncoding.HASH, ca_cert)
     else:
         builder = ocsp.OCSPResponseBuilder().add_response(
@@ -50,7 +67,7 @@ def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
             algorithm=hashes.SHA256(),
             cert_status=ocsp.OCSPCertStatus.GOOD,
             this_update=now,
-            next_update=None,
+            next_update=next_update,
             revocation_time=None,
             revocation_reason=None,
         ).responder_id(ocsp.OCSPResponderEncoding.HASH, ca_cert)
