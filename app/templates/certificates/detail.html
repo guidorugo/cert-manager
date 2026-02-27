@@ -45,12 +45,87 @@
                         </td>
                     </tr>
                     <tr><th>Private Key</th><td>{{ "Available" if cert.private_key_enc else "Not stored" }}</td></tr>
+                    {% if cert.requester %}
+                    <tr><th>Requested By</th><td>{{ cert.requester.username }}</td></tr>
+                    {% endif %}
                     <tr><th>Created</th><td>{{ cert.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
                 </table>
             </div>
         </div>
+
+        {% set subject_labels = {
+            "CN": "Common Name", "commonName": "Common Name",
+            "O": "Organization", "organizationName": "Organization",
+            "OU": "Organizational Unit", "organizationalUnitName": "Organizational Unit",
+            "C": "Country", "countryName": "Country",
+            "ST": "State", "stateOrProvinceName": "State",
+            "L": "Locality", "localityName": "Locality"
+        } %}
+        {% set subject_items = [] %}
+        {% for key, value in subject.items() %}
+            {% if value %}
+                {% if subject_items.append((subject_labels.get(key, key), value)) %}{% endif %}
+            {% endif %}
+        {% endfor %}
+        {% if subject_items %}
+        <div class="card mb-3">
+            <div class="card-header">Subject Details</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    {% for label, value in subject_items %}
+                    <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </div>
+        {% endif %}
     </div>
     <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">Key Usage &amp; Extensions</div>
+            <div class="card-body">
+                {% set ku_labels = {
+                    "digital_signature": "Digital Signature",
+                    "key_encipherment": "Key Encipherment",
+                    "content_commitment": "Content Commitment",
+                    "data_encipherment": "Data Encipherment",
+                    "key_agreement": "Key Agreement"
+                } %}
+                <h6>Key Usage</h6>
+                <ul class="list-unstyled mb-3">
+                    {% for flag, label in ku_labels.items() %}
+                    <li>
+                        {{ label }}:
+                        {% if key_usage.get(flag) %}
+                        <span class="badge bg-success">Yes</span>
+                        {% else %}
+                        <span class="badge bg-secondary">No</span>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+
+                {% set eku_labels = {
+                    "serverAuth": "Server Authentication (TLS)",
+                    "clientAuth": "Client Authentication",
+                    "codeSigning": "Code Signing",
+                    "emailProtection": "Email Protection (S/MIME)",
+                    "timeStamping": "Time Stamping",
+                    "ocspSigning": "OCSP Signing"
+                } %}
+                <h6>Extended Key Usage</h6>
+                {% if extended_key_usage %}
+                <ul class="list-unstyled mb-0">
+                    {% for eku in extended_key_usage %}
+                    <li><span class="badge bg-info text-dark">{{ eku_labels.get(eku, eku) }}</span></li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <span class="text-muted">None</span>
+                {% endif %}
+            </div>
+        </div>
+
         {% if san_list %}
         <div class="card mb-3">
             <div class="card-header">Subject Alternative Names</div>

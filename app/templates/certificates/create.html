@@ -186,11 +186,17 @@
                         </div>
                     </div>
                 </div>
+                {% if "localhost" in ocsp_server %}
+                <div class="alert alert-warning">
+                    <strong>Notice:</strong> CRL/OCSP URLs will use <code>{{ ocsp_server }}</code>.
+                    Set the <code>SERVER_NAME_FOR_OCSP</code> environment variable for production.
+                </div>
+                {% endif %}
                 <div class="mb-3">
                     <label for="crl_dp" class="form-label">CRL Distribution Point
-                        <span class="field-info" data-bs-toggle="tooltip" title="URL where the CRL for the issuing CA can be downloaded. Auto-populated based on the selected CA.">!</span>
+                        <span class="field-info" data-bs-toggle="tooltip" title="URL where the CRL for the issuing CA can be downloaded. Auto-populated based on the selected CA, but can be overridden.">!</span>
                     </label>
-                    <input type="text" class="form-control" id="crl_dp" readonly>
+                    <input type="text" class="form-control" id="crl_dp" name="crl_dp_url">
                 </div>
             </div>
         </div>
