@@ -1,9 +1,13 @@
+import logging
+
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
 
 from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..services import ca_service, crl_service, audit_service
+
+logger = logging.getLogger(__name__)
 
 ca_bp = Blueprint("ca", __name__, url_prefix="/ca")
 
@@ -72,7 +76,8 @@ def create():
             except ValueError as e:
                 flash(str(e), "danger")
             except Exception as e:
-                flash(f"Error importing CA: {e}", "danger")
+                logger.exception("Error importing CA")
+                flash("An unexpected error occurred while importing the CA.", "danger")
 
         else:
             # Generate mode - existing logic
@@ -135,7 +140,8 @@ def create():
                 flash(f"CA '{ca.name}' created successfully.", "success")
                 return redirect(url_for("ca.detail", ca_id=ca.id))
             except Exception as e:
-                flash(f"Error creating CA: {e}", "danger")
+                logger.exception("Error creating CA")
+                flash("An unexpected error occurred while creating the CA.", "danger")
 
     cas = CertificateAuthority.query.all()
     return render_template("ca/create.html", cas=cas)
@@ -191,7 +197,8 @@ def revoke(ca_id):
             flash(msg, "success")
             return redirect(url_for("ca.detail", ca_id=ca.id))
         except Exception as e:
-            flash(f"Error revoking CA: {e}", "danger")
+            logger.exception("Error revoking CA")
+            flash("An unexpected error occurred while revoking the CA.", "danger")
 
     # Count affected items for the confirmation page
     from ..models.certificate import Certificate
@@ -229,6 +236,7 @@ def generate_crl(ca_id):
         db.session.commit()
         flash(f"CRL #{ca.crl_number} generated successfully.", "success")
     except Exception as e:
-        flash(f"Error generating CRL: {e}", "danger")
+        logger.exception("Error generating CRL")
+        flash("An unexpected error occurred while generating the CRL.", "danger")
 
     return redirect(url_for("ca.detail", ca_id=ca.id))

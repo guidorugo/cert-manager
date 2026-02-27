@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 
 from flask import (
@@ -12,6 +13,8 @@ from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.certificate import Certificate
 from ..services import cert_service, crl_service, audit_service
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_filename(name, extension):
@@ -134,7 +137,8 @@ def create():
             flash(f"Certificate '{certificate.common_name}' created.", "success")
             return redirect(url_for("certificates.detail", cert_id=certificate.id))
         except Exception as e:
-            flash(f"Error creating certificate: {e}", "danger")
+            logger.exception("Error creating certificate")
+            flash("An unexpected error occurred while creating the certificate.", "danger")
 
     cas = CertificateAuthority.query.all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
@@ -177,7 +181,8 @@ def revoke(cert_id):
             flash(f"Certificate '{certificate.common_name}' revoked.", "success")
             return redirect(url_for("certificates.detail", cert_id=cert_id))
         except Exception as e:
-            flash(f"Error revoking certificate: {e}", "danger")
+            logger.exception("Error revoking certificate")
+            flash("An unexpected error occurred while revoking the certificate.", "danger")
 
     return render_template("certificates/revoke.html", cert=certificate)
 

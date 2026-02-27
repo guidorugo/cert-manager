@@ -187,6 +187,10 @@ def _migrate_schema():
     # Migrate certificate_authorities table
     if "certificate_authorities" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("certificate_authorities")}
+        if "crl_pem" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN crl_pem TEXT"
+            ))
         if "is_revoked" not in columns:
             db.session.execute(text(
                 "ALTER TABLE certificate_authorities ADD COLUMN is_revoked BOOLEAN NOT NULL DEFAULT 0"

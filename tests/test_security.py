@@ -81,8 +81,9 @@ class TestOpenRedirect:
     def test_safe_url_internal_path(self):
         assert _is_safe_url("/ca/") is True
 
-    def test_safe_url_relative(self):
-        assert _is_safe_url("dashboard") is True
+    def test_safe_url_relative_rejected(self):
+        # Relative paths without leading / are rejected for safety
+        assert _is_safe_url("dashboard") is False
 
     def test_safe_url_rejects_absolute_external(self):
         assert _is_safe_url("https://evil.com") is False
