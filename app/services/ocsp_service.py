@@ -9,6 +9,27 @@ from .crypto_utils import decrypt_private_key
 
 OCSP_RESPONSE_VALIDITY_HOURS = 24
 
+_ALLOWED_OCSP_HASHES = (
+    hashes.SHA1, hashes.SHA224, hashes.SHA256, hashes.SHA384, hashes.SHA512,
+)
+
+
+def _request_hash_algorithm(ocsp_req):
+    """Mirror the request's CertID hash algorithm in the response.
+
+    Clients match responses to requests by CertID, which includes the hash
+    algorithm. openssl defaults to SHA-1, and always answering with SHA-256
+    made such clients report "no status found". Falls back to SHA-256 for
+    unsupported algorithms.
+    """
+    try:
+        algorithm = ocsp_req.hash_algorithm
+        if isinstance(algorithm, _ALLOWED_OCSP_HASHES):
+            return algorithm
+    except Exception:
+        pass
+    return hashes.SHA256()
+
 _REVOCATION_REASONS = {
     "unspecified": x509.ReasonFlags.unspecified,
     "key_compromise": x509.ReasonFlags.key_compromise,
@@ -37,6 +58,7 @@ def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
     ocsp_req = ocsp.load_der_ocsp_request(ocsp_request_der)
     serial = ocsp_req.serial_number
     serial_hex = format(serial, "x")
+    algorithm = _request_hash_algorithm(ocsp_req)
 
     certificate = Certificate.query.filter_by(
         serial_number=serial_hex, ca_id=ca.id
@@ -61,7 +83,7 @@ def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
         builder = ocsp.OCSPResponseBuilder().add_response(
             cert=cert_obj,
             issuer=ca_cert,
-            algorithm=hashes.SHA256(),
+            algorithm=algorithm,
             cert_status=ocsp.OCSPCertStatus.REVOKED,
             this_update=now,
             next_update=next_update,
@@ -72,7 +94,7 @@ def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
         builder = ocsp.OCSPResponseBuilder().add_response(
             cert=cert_obj,
             issuer=ca_cert,
-            algorithm=hashes.SHA256(),
+            algorithm=algorithm,
             cert_status=ocsp.OCSPCertStatus.GOOD,
             this_update=now,
             next_update=next_update,
