@@ -1,5 +1,5 @@
 body {
-    background-color: #f8f9fa;
+    background-color: var(--bs-tertiary-bg);
 }
 
 pre {
@@ -29,4 +29,15 @@ pre {
 }
 .field-info:hover {
     background-color: #495057;
+}
+
+/* Dark mode toggle: show moon in light mode, sun in dark mode */
+.theme-toggle .theme-icon-sun {
+    display: none;
+}
+[data-bs-theme="dark"] .theme-toggle .theme-icon-sun {
+    display: inline;
+}
+[data-bs-theme="dark"] .theme-toggle .theme-icon-moon {
+    display: none;
 }
