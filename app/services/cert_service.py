@@ -73,6 +73,8 @@ EKU_MAP = {
 def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
              key_usage=None, extended_key_usage=None, ocsp_url=None,
              crl_dp_url=None):
+    if not ca.private_key_enc:
+        raise ValueError("This CA was imported without its private key and cannot issue certificates.")
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
     ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
     csr = x509.load_pem_x509_csr(csr_model.csr_pem.encode())
@@ -237,6 +239,8 @@ def create_certificate(ca, subject_attrs, san_list, validity_days, passphrase,
                        key_type="RSA", key_size=2048, key_usage=None,
                        extended_key_usage=None, ocsp_url=None,
                        crl_dp_url=None):
+    if not ca.private_key_enc:
+        raise ValueError("This CA was imported without its private key and cannot issue certificates.")
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
     ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
 
