@@ -173,7 +173,7 @@ class TestPublicEndpointErrorDisclosure:
         from app.models.ca import CertificateAuthority
         ca = CertificateAuthority(
             name=name, common_name=name,
-            serial_number="00", certificate_pem="invalid",
+            serial_number="00", certificate_pem="invalid", crl_pem="invalid",
             private_key_enc=b"invalid", key_type="RSA", key_size=2048,
             not_before=datetime.now(timezone.utc),
             not_after=datetime.now(timezone.utc),
@@ -193,13 +193,29 @@ class TestPublicEndpointErrorDisclosure:
         assert b"Traceback" not in resp.data
         assert b"Error generating CRL:" not in resp.data
 
-    def test_crl_pem_error_generic_message(self, client, app):
+    def test_crl_pem_no_leak(self, client, app):
+        """The public PEM CRL endpoint is read-only (serves the cached CRL,
+        no crypto), so it cannot raise or leak a traceback. A CA with no
+        cached CRL returns a clean 404."""
+        from app.models.ca import CertificateAuthority
         with app.app_context():
-            ca_id = self._make_dummy_ca("Test CA PEM")
+            ca = CertificateAuthority(
+                name="Test CA PEM NoCRL", common_name="Test CA PEM NoCRL",
+                serial_number="00", certificate_pem="invalid",
+                private_key_enc=b"invalid", key_type="RSA", key_size=2048,
+                not_before=None, not_after=None,
+            )
+            # bypass the not-null datetimes for this dummy
+            from datetime import datetime, timezone
+            ca.not_before = datetime.now(timezone.utc)
+            ca.not_after = datetime.now(timezone.utc)
+            _db.session.add(ca)
+            _db.session.commit()
+            ca_id = ca.id
 
         resp = client.get(f"/public/crl/{ca_id}.pem")
-        assert resp.status_code == 500
-        assert b"Internal server error" in resp.data
+        assert resp.status_code == 404
+        assert b"Traceback" not in resp.data
 
     def test_ocsp_error_generic_message(self, client, app):
         with app.app_context():

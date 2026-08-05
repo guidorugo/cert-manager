@@ -65,38 +65,38 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 |---|---|---|---|---|
 | A1 | **Critical** | Carried | All CA private keys protected by one env-var passphrase; no HSM; single point of compromise | Key Mgmt |
 | A7 | **High** | NEW · partly fixed | CA private-key **export over HTTP** — secret-in-GET **fixed in v1.0.1**; unencrypted key PEM, HTTPS enforcement & dual-control residuals open | Key Mgmt |
-| A2 | Medium* | Revised | App DB (encrypted keys, hashes, audit) world-readable on host (*High on a shared host); stale `instance/` DB too | Storage |
+| A2 | Medium* | Mitigated | App DB (encrypted keys, hashes, audit) world-readable on host (*High on a shared host); stale `instance/` DB too | Storage |
 | A3 | Medium | ✅ **Resolved** | Live Forgejo password was in `.git/config` — **rotated & de-embedded 2026-08-05** | Secrets |
-| A4 | Medium | Carried | Insecure defaults (`admin/admin`) in `.env.example`/compose | Secrets |
+| A4 | Medium | Accepted | Insecure defaults (`admin/admin`) in `.env.example`/compose | Secrets |
 | A5 | Medium | Carried | Subscriber private-key escrow (server generates+stores+serves keys) | Key Mgmt |
 | A6 | Low | ✅ **Resolved** | `venv/` was in git history — **purged 2026-08-05** (history + tags rewritten, force-pushed) | Supply chain |
-| B1 | **High** | Carried | CSR proof-of-possession never verified (`is_signature_valid` absent) | PKI |
-| B2 | **High** | Carried | Revocation does not propagate to published CRL (stale cache) | PKI |
-| B3 | **High** | Carried | Revoked intermediate CAs never listed in parent CRL/OCSP | PKI |
-| B4 | Medium | Carried | No issuance policy limits (validity, path length, name constraints) | PKI |
-| B5 | Medium | Carried | Weak key sizes accepted (RSA < 2048), incl. from low-priv users | PKI |
+| B1 | **High** | ✅ **Resolved** | CSR proof-of-possession never verified (`is_signature_valid` absent) | PKI |
+| B2 | **High** | ✅ **Resolved** | Revocation does not propagate to published CRL (stale cache) | PKI |
+| B3 | **High** | ✅ **Resolved** | Revoked intermediate CAs never listed in parent CRL/OCSP | PKI |
+| B4 | Medium | ✅ **Resolved** | No issuance policy limits (validity, path length, name constraints) | PKI |
+| B5 | Medium | ✅ **Resolved** | Weak key sizes accepted (RSA < 2048), incl. from low-priv users | PKI |
 | B6 | Low | Carried | OCSP signs with CA key directly, no nonce (replayable) | PKI |
-| C1 | **High** | Carried | Unauthenticated OCSP forces CA-key decrypt (600k PBKDF2) per request → DoS; key decrypt precedes parse | API/DoS |
-| C2 | Medium | Carried | No `MAX_CONTENT_LENGTH` — unbounded request bodies | API/DoS |
-| C3 | Medium | Carried | Leaf PKCS#12 export password via GET; weak `changeit` default | API |
+| C1 | **High** | ✅ **Resolved** | Unauthenticated OCSP forces CA-key decrypt (600k PBKDF2) per request → DoS; key decrypt precedes parse | API/DoS |
+| C2 | Medium | ✅ **Resolved** | No `MAX_CONTENT_LENGTH` — unbounded request bodies | API/DoS |
+| C3 | Medium | ✅ **Resolved** | Leaf PKCS#12 export password via GET; weak `changeit` default | API |
 | C4 | Low-Med | Carried | Host-header injection into issued-cert OCSP/CRL URLs (default behavior) | API |
-| C5 | Low-Med | Carried | Open-redirect via backslash in `next` (Werkzeug emits `/\` unencoded) | API |
+| C5 | Low-Med | ✅ **Resolved** | Open-redirect via backslash in `next` (Werkzeug emits `/\` unencoded) | API |
 | D1 | Medium | Carried | No rate limiting / lockout / MFA on login or Basic Auth | AuthN |
 | D2 | Medium | Carried | Migration grants `role='admin'` to all pre-existing users | AuthZ |
 | D3 | Medium | Carried | Basic Auth default-on over plaintext; failed attempts flood audit; `_burn_hash` CPU amplification | AuthN |
 | D4 | Low | Carried | No multi-party authorization for CA operations (now incl. key export) | AuthZ |
 | D5 | Low | Carried | Default-admin creation race; ADMIN_PASSWORD not rotated after first boot | AuthN |
-| D6 | Medium | **NEW** | LDAP: configuring only the admin group grants **every** directory user a `csr_requester` account | AuthZ |
+| D6 | Medium | ✅ **Resolved** | LDAP: configuring only the admin group grants **every** directory user a `csr_requester` account | AuthZ |
 | D7 | Low | **NEW** | LDAP: credential cache masks directory-side password/disable/role changes for up to TTL | AuthN |
 | D8 | Low | **NEW** | CSRF fully skipped for Basic Auth — browser-cached credentials enable CSRF | AuthN |
 | E1 | **High** | Carried | No TLS in shipped stack; secure-cookie/OCSP-scheme default insecure | Transit |
-| E2 | Low | Carried | Runtime CDN dependency; no CSP (SRI present); inline theme script needs nonce under CSP | Transit |
+| E2 | Low | ✅ **Resolved** | Runtime CDN dependency; no CSP (SRI present); inline theme script needs nonce under CSP | Transit |
 | E3 | Medium | **NEW** | LDAP: plaintext `ldap://` silently allowed; no TLS guardrail at startup | Transit |
 | F1 | Medium | Carried | Key material not zeroizable; resident in memory/swap/core dumps | Runtime |
 | F2 | Medium | Carried | Debug mode exposes Werkzeug debugger and bypasses insecure-default checks | Runtime |
 | F3 | Low | Carried | CRL number increment race across workers | Runtime |
 | G1 | Medium | Carried | Audit log not tamper-evident; no anomaly alerting | Logging |
-| G2 | Low | Carried | `remote_addr` without `ProxyFix` — wrong client IP in logs/limits | Logging |
+| G2 | Low | ✅ **Resolved** | `remote_addr` without `ProxyFix` — wrong client IP in logs/limits | Logging |
 | H1 | Medium | Carried | Container runs as root; no hardening in compose | Container |
 | H2 | Low-Med | Carried | Base image pinned by mutable tag; no image vuln scan | Container |
 | I1 | Medium | Carried | No dependency hash/lockfile integrity pinning (transitive deps float) | Supply chain |
@@ -105,9 +105,13 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | J1 | Medium | Carried | CI actions pinned by mutable tags, not commit SHAs | CI/CD |
 | J2 | Medium | Carried | No image signing / provenance / SBOM | CI/CD |
 
-Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings (5 new, 3 revised, 31 carried).
+Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A large batch was remediated in **v1.1.0** (see below); the headline residual is **A1** (single-passphrase key protection — pending an HSM/KMS decision), the rest of **A7**, and the deployment items (E1 TLS, H1 container, CI supply-chain).
 
-**Remediated since publication (2026-08-05):** **A3** (Forgejo credential rotated and de-embedded), **A6** (`venv/` purged from history + tags), and the secret-in-GET portion of **A7** (CA `key`/`pkcs12` export made POST-only, password read from the form only; shipped in **v1.0.1**). A7's remaining items (unencrypted key PEM, mandatory HTTPS, dual control) remain open. All other prior findings stand.
+**Remediated (2026-08-05):**
+- **Operational:** **A3** (Forgejo credential rotated + de-embedded), **A6** (`venv/` purged from history + tags).
+- **v1.0.1:** the secret-in-GET portion of **A7** (CA `key`/`pkcs12` export made POST-only).
+- **v1.1.0 (security-hardening batch):** **B1** (CSR proof-of-possession enforced), **B2/B3** (revocation regenerates CRLs; revoked sub-CAs now appear in the parent CRL **and** OCSP), **B4** (validity capped and clamped to the CA's expiry), **B5** (minimum RSA 2048), **C1** (OCSP parses + looks up **before** decrypting, caches the CA key; public CRL is read-only), **C2** (`MAX_CONTENT_LENGTH`), **C3** (leaf key/PKCS#12 export POST-only), **C5** (open-redirect backslash), **D6** (LDAP admin-group-only no longer admits the whole directory), **E2** (CSP/HSTS/Referrer-Policy), **G2** (opt-in ProxyFix), **L1** (secure-cookie default). **A2** mitigated: `MASTER_PASSPHRASE` moved to a Docker secret (out of the process env) and the DB tightened to `600`. **A4** accepted (intentional example placeholder).
+- **Headline still-open:** **A1** (single-passphrase key protection — HSM/KMS decision pending), the rest of **A7** (unencrypted key PEM, mandatory HTTPS, dual control), **E1** (no TLS in the shipped stack — L1 hardens the default but a TLS proxy is still required), and the container/CI supply-chain items (H1/H2/I/J).
 
 ---
 
@@ -133,7 +137,8 @@ Every CA (and escrowed subscriber) private key is Fernet-encrypted with a key de
 ### [MEDIUM] A3 — Forgejo credential in `.git/config` — ✅ *Resolved 2026-08-05*
 `.git/config` is per-clone local metadata (regenerated on every clone), so the embedded Forgejo password was a **local-disk exposure only — never distributed in a clone** and never in git history. **Resolved:** the `home` password was rotated (old value confirmed dead), the credential de-embedded from the remote URL and moved to a mode-`600` `credential.helper store`; the same de-embedding was applied to the other local repos that reused it (`CatDetection`, `CatDetection-backup`, `Felisight`), and a sweep confirms none remain. *Operational follow-up: record the new password in a password manager, and check any n8n/automation that used the `home` password (webhooks use a URL/secret and are unaffected).*
 
-### [MEDIUM] A4 — Insecure default secrets in code and `.env.example` — *Carried*
+### [MEDIUM] A4 — Insecure default secrets in code and `.env.example` — 🟡 *Accepted (2026-08-05)*
+**Accepted / won't-fix:** the `admin`/`admin` values live in `.env.example` and the compose defaults as intentional example placeholders for first-boot; the `_check_security` startup guard already refuses to run in production with the insecure defaults (`sys.exit(1)`), so a real deployment cannot start on them. Operators must set real secrets (now including the `MASTER_PASSPHRASE` Docker secret). Original note retained below for context.
 `.env.example` ships `ADMIN_USERNAME=admin`/`ADMIN_PASSWORD=admin`; `docker-compose.yml:15` uses `${ADMIN_PASSWORD:-admin}` (unlike `SECRET_KEY`/`MASTER_PASSPHRASE`, which fail-closed with `:?`). The `_check_security` guard rejects the three exact insecure defaults (good) but only exact-string-matches (a weak-but-different passphrase passes) and is bypassed in debug (F2). A predictable `SECRET_KEY` enables session forgery. **Fix:** remove real-looking defaults; require secrets with no fallback; enforce a minimum-entropy check rather than exact denylist; use `${ADMIN_PASSWORD:?...}`. *(Positive: the new LDAP config defaults are safe — `LDAP_TLS_VERIFY` defaults true, and empty-env hardening prevents silent disablement.)*
 
 ### [MEDIUM] A5 — Subscriber private-key escrow — *Carried*

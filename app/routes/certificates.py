@@ -199,7 +199,8 @@ def revoke(cert_id):
     if request.method == "POST":
         reason = request.form.get("reason", "unspecified")
         try:
-            crl_service.revoke_certificate(cert_id, reason)
+            crl_service.revoke_certificate(
+                cert_id, reason, passphrase=current_app.config["MASTER_PASSPHRASE"])
             audit_service.log_action("revoke_certificate", target_type="certificate", target_id=cert_id,
                                      details={"reason": reason})
             db.session.commit()
@@ -212,7 +213,7 @@ def revoke(cert_id):
     return render_template("certificates/revoke.html", cert=certificate)
 
 
-@certificates_bp.route("/<int:cert_id>/download")
+@certificates_bp.route("/<int:cert_id>/download", methods=["GET", "POST"])
 @login_required
 def download(cert_id):
     certificate = db.session.get(Certificate, cert_id)
@@ -224,7 +225,14 @@ def download(cert_id):
         flash("You do not have permission to download this certificate.", "danger")
         return redirect(url_for("certificates.list_certs"))
 
-    fmt = request.args.get("format", "pem")
+    fmt = request.values.get("format", "pem")
+
+    # C3: PKCS#12 bundles the private key and takes an export password; make it
+    # POST-only and read the password from the form so neither the key material
+    # nor the password lands in a GET URL / access log.
+    if fmt == "pkcs12" and request.method != "POST":
+        flash("PKCS#12 export must be submitted via POST.", "danger")
+        return redirect(url_for("certificates.detail", cert_id=cert_id))
 
     audit_service.log_action("download_certificate", target_type="certificate", target_id=cert_id,
                              details={"format": fmt})
@@ -239,7 +247,7 @@ def download(cert_id):
         )
     elif fmt == "pkcs12":
         passphrase = current_app.config["MASTER_PASSPHRASE"]
-        export_password = request.args.get("password", "changeit")
+        export_password = request.form.get("password", "")
         try:
             data = cert_service.export_pkcs12(certificate, passphrase, export_password)
             return Response(
@@ -259,7 +267,7 @@ def download(cert_id):
         )
 
 
-@certificates_bp.route("/<int:cert_id>/download-key")
+@certificates_bp.route("/<int:cert_id>/download-key", methods=["POST"])
 @admin_required
 def download_key(cert_id):
     certificate = db.session.get(Certificate, cert_id)

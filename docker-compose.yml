@@ -9,11 +9,20 @@ services:
       - ./data:/app/data
     environment:
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set}
-      - MASTER_PASSPHRASE=${MASTER_PASSPHRASE:?MASTER_PASSPHRASE must be set}
+      # A2/A1-tier0: MASTER_PASSPHRASE is delivered as a Docker secret (file at
+      # /run/secrets/master_passphrase) instead of an env var, so it does not
+      # appear in `docker inspect`, /proc/<pid>/environ, or the compose env.
+      # (SECRET_KEY can be moved the same way via SECRET_KEY_FILE if desired.)
+      - MASTER_PASSPHRASE_FILE=/run/secrets/master_passphrase
       - DATABASE_URL=sqlite:////app/data/cert-manager.db
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - SERVER_NAME_FOR_OCSP=${SERVER_NAME_FOR_OCSP:-localhost:5000}
+      # This reference stack serves plain HTTP, so secure cookies are disabled;
+      # put a TLS proxy in front and set SESSION_COOKIE_SECURE=true. If the app
+      # runs behind a reverse proxy, set TRUSTED_PROXY_COUNT to the hop count.
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - TRUSTED_PROXY_COUNT=${TRUSTED_PROXY_COUNT:-}
       # LDAP authentication (optional feature - stays disabled unless
       # configured in .env; unset variables fall back to app defaults)
       - LDAP_ENABLED=${LDAP_ENABLED:-false}
@@ -31,4 +40,13 @@ services:
       - LDAP_GROUP_MEMBER_ATTR=${LDAP_GROUP_MEMBER_ATTR:-}
       - LDAP_TIMEOUT_SECONDS=${LDAP_TIMEOUT_SECONDS:-}
       - BASIC_AUTH_CACHE_TTL_SECONDS=${BASIC_AUTH_CACHE_TTL_SECONDS:-}
+    secrets:
+      - master_passphrase
     restart: unless-stopped
+
+secrets:
+  master_passphrase:
+    # Create this file (chmod 600) with your master passphrase; keep it out of
+    # git (the ./secrets directory is gitignored). It must contain the SAME
+    # passphrase used to encrypt the existing CA keys.
+    file: ./secrets/master_passphrase

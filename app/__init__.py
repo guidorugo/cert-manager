@@ -11,6 +11,16 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # G2: only trust X-Forwarded-* when explicitly told how many proxy hops sit
+    # in front (TRUSTED_PROXY_COUNT). Default 0 = directly exposed, use
+    # remote_addr as-is so a client cannot spoof its IP via a forged header.
+    _hops = app.config.get("TRUSTED_PROXY_COUNT", 0)
+    if _hops and _hops > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app, x_for=_hops, x_proto=_hops, x_host=_hops, x_port=_hops
+        )
+
     db.init_app(app)
     login_manager.init_app(app)
     _setup_basic_auth(app)
@@ -195,6 +205,28 @@ def _setup_security_headers(app):
     def set_security_headers(response):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        # E2: restrict resource origins, frame embedding, and base URI. Bootstrap
+        # is served from jsdelivr; 'unsafe-inline' is retained because several
+        # templates use inline <script> and on* handlers — a future step is to
+        # nonce those and drop 'unsafe-inline'. object/frame-ancestors are locked
+        # down and base-uri is pinned regardless.
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "font-src 'self' https://cdn.jsdelivr.net; "
+            "connect-src 'self'; "
+            "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
+            "form-action 'self'",
+        )
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # HSTS is ignored by browsers over plain HTTP, so it's safe to always
+        # send; it takes effect once the app is served over TLS.
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
         return response
 
 

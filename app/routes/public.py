@@ -1,10 +1,12 @@
 import re
 
 from flask import Blueprint, Response, current_app, request
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 from ..extensions import db, csrf
 from ..models.ca import CertificateAuthority
-from ..services import crl_service, ocsp_service
+from ..services import ocsp_service
 
 
 def _safe_filename(name, extension):
@@ -20,20 +22,21 @@ def download_crl_der(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
         return "CA not found", 404
-    if not ca.has_private_key:
-        # Certificate-only import: this CA cannot sign CRLs
+    # C1: the public CRL endpoint is strictly read-only — it serves the cached
+    # CRL and never decrypts the CA key or writes to the DB. Keyed CAs get an
+    # initial CRL at creation; revocation refreshes it (B2). No cached CRL
+    # (e.g. certificate-only CA) → 404.
+    if not ca.crl_pem:
         return "CRL not available for this CA", 404
-
-    passphrase = current_app.config["MASTER_PASSPHRASE"]
     try:
-        crl_der = crl_service.get_crl_der(ca, passphrase)
+        crl = x509.load_pem_x509_crl(ca.crl_pem.encode())
         return Response(
-            crl_der,
+            crl.public_bytes(serialization.Encoding.DER),
             mimetype="application/pkix-crl",
             headers={"Content-Disposition": _safe_filename(ca.name, "crl")},
         )
     except Exception:
-        current_app.logger.exception("Error generating CRL (DER)")
+        current_app.logger.exception("Error serving cached CRL (DER)")
         return "Internal server error", 500
 
 
@@ -42,15 +45,11 @@ def download_crl_pem(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
         return "CA not found", 404
-    if not ca.has_private_key:
-        # Certificate-only import: this CA cannot sign CRLs
+    if not ca.crl_pem:  # C1: read-only, see download_crl_der
         return "CRL not available for this CA", 404
-
-    passphrase = current_app.config["MASTER_PASSPHRASE"]
     try:
-        crl_pem = crl_service.get_crl_pem(ca, passphrase)
         return Response(
-            crl_pem,
+            ca.crl_pem,
             mimetype="application/x-pem-file",
             headers={"Content-Disposition": _safe_filename(ca.name, "crl.pem")},
         )

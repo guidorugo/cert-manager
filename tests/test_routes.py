@@ -113,13 +113,16 @@ class TestPublicCRLDownload:
         assert resp.status_code == 404
 
     def test_crl_cached_after_generation(self, app, db):
-        """CRL should be cached on the CA model after generation."""
+        """CRL is cached on the CA model. A keyed CA gets an initial CRL at
+        creation, and regeneration refreshes the cache."""
         with app.app_context():
             ca = _create_test_ca()
-            assert ca.crl_pem is None
+            assert ca.crl_pem is not None  # initial CRL published at creation
+            assert "BEGIN X509 CRL" in ca.crl_pem
+            first_number = ca.crl_number
             crl_service.generate_crl(ca, PASSPHRASE)
             assert ca.crl_pem is not None
-            assert "BEGIN X509 CRL" in ca.crl_pem
+            assert ca.crl_number == first_number + 1
 
 
 class TestPublicOCSP:
@@ -258,7 +261,8 @@ class TestCertificateDownloads:
                 c.post("/auth/login", data={
                     "username": "testadmin", "password": "adminpass"
                 })
-                resp = c.get(f"/certificates/{cert.id}/download?format=pkcs12&password=testpw")
+                resp = c.post(f"/certificates/{cert.id}/download",
+                              data={"format": "pkcs12", "password": "testpw"})
                 assert resp.status_code == 200
                 assert resp.mimetype == "application/x-pkcs12"
                 assert len(resp.data) > 0
@@ -300,7 +304,7 @@ class TestPrivateKeyDownload:
                 c.post("/auth/login", data={
                     "username": "testadmin", "password": "adminpass"
                 })
-                resp = c.get(f"/certificates/{cert.id}/download-key")
+                resp = c.post(f"/certificates/{cert.id}/download-key")
                 assert resp.status_code == 200
                 assert b"BEGIN PRIVATE KEY" in resp.data
 
@@ -312,11 +316,11 @@ class TestPrivateKeyDownload:
                 c.post("/auth/login", data={
                     "username": "testrequester", "password": "requesterpass"
                 })
-                resp = c.get(f"/certificates/{cert.id}/download-key", follow_redirects=True)
+                resp = c.post(f"/certificates/{cert.id}/download-key", follow_redirects=True)
                 assert b"do not have permission" in resp.data
 
     def test_key_download_not_found(self, auth_admin):
-        resp = auth_admin.get("/certificates/99999/download-key")
+        resp = auth_admin.post("/certificates/99999/download-key")
         assert resp.status_code == 302
 
     def test_key_download_no_key(self, app, db, admin_user):
@@ -331,7 +335,7 @@ class TestPrivateKeyDownload:
                 c.post("/auth/login", data={
                     "username": "testadmin", "password": "adminpass"
                 })
-                resp = c.get(f"/certificates/{cert.id}/download-key", follow_redirects=True)
+                resp = c.post(f"/certificates/{cert.id}/download-key", follow_redirects=True)
                 assert b"No private key" in resp.data
 
 

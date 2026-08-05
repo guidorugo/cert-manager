@@ -291,7 +291,8 @@ def revoke(ca_id):
     if request.method == "POST":
         reason = request.form.get("reason", "unspecified")
         try:
-            _, certs_revoked, sub_cas_revoked = crl_service.revoke_ca(ca_id, reason)
+            _, certs_revoked, sub_cas_revoked = crl_service.revoke_ca(
+                ca_id, reason, passphrase=current_app.config["MASTER_PASSPHRASE"])
             audit_service.log_action("revoke_ca", target_type="ca", target_id=ca_id,
                                      details={"reason": reason, "certs_revoked": certs_revoked,
                                               "sub_cas_revoked": sub_cas_revoked})

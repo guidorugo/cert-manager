@@ -9,6 +9,9 @@ venv/
 # Environment variables
 .env
 
+# Docker secrets (e.g. the master passphrase file)
+secrets/
+
 # Database
 data/
 
