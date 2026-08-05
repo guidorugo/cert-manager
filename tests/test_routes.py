@@ -174,7 +174,7 @@ class TestPublicOCSP:
                     content_type="application/ocsp-request",
                 )
                 ocsp_resp = ocsp.load_der_ocsp_response(resp.data)
-                assert ocsp_resp.next_update is not None
+                assert ocsp_resp.next_update_utc is not None
 
     def test_ocsp_unknown_serial(self, app, db):
         """OCSP request for unknown serial should return UNAUTHORIZED."""
