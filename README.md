@@ -118,6 +118,8 @@ curl -u admin:admin http://localhost:5000/ca/
 curl -u admin:admin -X POST http://localhost:5000/ca/1/crl
 ```
 
+Basic Auth works for local and LDAP accounts alike. To keep the per-request cost low, successfully verified credentials are cached in process memory for a short TTL (`BASIC_AUTH_CACHE_TTL_SECONDS`, default 60 seconds; set `0` to disable). A cache hit skips the LDAP bind / password-hash check but still re-reads the user record, so deactivations apply immediately.
+
 #### Session Cookies (browser / legacy)
 
 Alternatively, authenticate via session cookie:
@@ -253,6 +255,7 @@ python -m pytest tests/ -v
 | `RATE_LIMIT_DEFAULT` | `60/minute` | Default rate limit when enabled |
 | `BASIC_AUTH_ENABLED` | `true` | Enable HTTP Basic Auth for programmatic access |
 | `BASIC_AUTH_REALM` | `cert-manager` | Basic Auth realm name in `WWW-Authenticate` header |
+| `BASIC_AUTH_CACHE_TTL_SECONDS` | `60` | In-memory cache TTL for verified Basic Auth credentials (`0` disables) |
 | `OCSP_URL_SCHEME` | `http` | URL scheme for OCSP AIA URLs in certificates (`https` recommended for production) |
 | `SESSION_COOKIE_SECURE` | `false` | Send session cookie only over HTTPS (set to `true` in production) |
 | `LDAP_ENABLED` | `false` | Enable LDAP authentication for the web login |
@@ -275,7 +278,7 @@ When `LDAP_ENABLED=true`, the web login checks the local database first (so the 
 
 - Choose **one** mode: direct bind (`LDAP_USER_DN_TEMPLATE`) or search+bind (`LDAP_BIND_DN` + `LDAP_USER_SEARCH_BASE`). The app refuses to start with both or neither.
 - Locally deactivating an LDAP user blocks them regardless of directory state.
-- LDAP accounts have no local password: password reset is disabled for them, and HTTP Basic Auth (`curl -u`) currently works for local accounts only.
+- LDAP accounts have no local password: password reset is disabled for them. HTTP Basic Auth works for LDAP accounts too; if the directory is unreachable, LDAP-backed Basic Auth requests receive `503`.
 - Empty passwords are rejected before any bind (prevents the LDAP anonymous-bind pitfall), and usernames are escaped against LDAP filter injection.
 
 ## Architecture

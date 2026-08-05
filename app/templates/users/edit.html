@@ -5,6 +5,12 @@
 
 <div class="row mt-3">
     <div class="col-md-6">
+        {% if user.is_ldap_user %}
+        <div class="alert alert-info">
+            This user is managed by LDAP. The role is derived from directory group
+            membership and re-synced at every login.
+        </div>
+        {% endif %}
         <form method="POST">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="mb-3">
@@ -13,7 +19,7 @@
             </div>
             <div class="mb-3">
                 <label for="role" class="form-label">Role</label>
-                <select class="form-select" id="role" name="role">
+                <select class="form-select" id="role" name="role" {% if user.is_ldap_user %}disabled{% endif %}>
                     <option value="csr_requester" {{ 'selected' if user.role == 'csr_requester' }}>CSR Requester</option>
                     <option value="admin" {{ 'selected' if user.role == 'admin' }}>Admin</option>
                 </select>
