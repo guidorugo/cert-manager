@@ -449,6 +449,49 @@ def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None, key_passphras
     return _import_chain(name, ordered, private_key, passphrase, parent_id=parent_id)
 
 
+def export_ca_key_pem(ca, passphrase):
+    """Decrypt and return the CA's private key as unencrypted PKCS#8 PEM."""
+    if not ca.private_key_enc:
+        raise ValueError("This CA was imported without its private key; there is no key to export.")
+    key = decrypt_private_key(ca.private_key_enc, passphrase)
+    return key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+
+def export_ca_pkcs12(ca, passphrase, export_password):
+    """Export the CA as a password-protected PKCS#12 bundle.
+
+    The bundle contains the CA certificate, its private key, and the parent
+    chain as additional certificates — importable back via import_pkcs12().
+    """
+    from cryptography.hazmat.primitives.serialization import BestAvailableEncryption, pkcs12
+
+    if not ca.private_key_enc:
+        raise ValueError("This CA was imported without its private key; PKCS#12 export is not possible.")
+    if not export_password:
+        raise ValueError("An export password is required for PKCS#12.")
+
+    cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
+    key = decrypt_private_key(ca.private_key_enc, passphrase)
+
+    chain_certs = []
+    current = ca.parent
+    while current:
+        chain_certs.append(x509.load_pem_x509_certificate(current.certificate_pem.encode()))
+        current = current.parent
+
+    return pkcs12.serialize_key_and_certificates(
+        name=ca.name.encode(),
+        key=key,
+        cert=cert,
+        cas=chain_certs or None,
+        encryption_algorithm=BestAvailableEncryption(export_password.encode()),
+    )
+
+
 def import_pkcs12(name, p12_bytes, p12_password, passphrase, parent_id=None):
     """Import a CA from a PKCS#12 (.p12/.pfx) bundle.
 
