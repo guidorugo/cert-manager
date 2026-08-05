@@ -44,7 +44,7 @@ class TestCaExport:
 
     def test_key_export_matches_certificate(self, auth_admin, ca_pair, db):
         root, _ = ca_pair
-        resp = auth_admin.get(f"/ca/{root.id}/download?format=key")
+        resp = auth_admin.post(f"/ca/{root.id}/download", data={"format": "key"})
         assert resp.status_code == 200
         key = serialization.load_pem_private_key(resp.data, password=None)
         cert = x509.load_pem_x509_certificate(root.certificate_pem.encode())
@@ -80,8 +80,8 @@ class TestCaExport:
         db.session.commit()
         keyless = ca_service.import_ca("Keyless Export", cert_pem, None, PASS)
 
-        resp = auth_admin.get(
-            f"/ca/{keyless.id}/download?format=key", follow_redirects=True,
+        resp = auth_admin.post(
+            f"/ca/{keyless.id}/download", data={"format": "key"}, follow_redirects=True,
         )
         assert b"there is no key to export" in resp.data
         resp = auth_admin.post(
@@ -121,13 +121,46 @@ class TestCaExport:
         assert b"export password is required" in resp.data
 
 
+class TestKeyExportSecretNotInGet:
+    """A7: private-key exports must be POST-only, and the pkcs12 password
+    must never be honored from the query string (would leak into logs)."""
+
+    def test_get_key_export_refused(self, auth_admin, ca_pair):
+        root, _ = ca_pair
+        resp = auth_admin.get(f"/ca/{root.id}/download?format=key")
+        assert resp.status_code == 302  # redirected, not served
+        assert b"PRIVATE KEY" not in resp.data
+        resp = auth_admin.get(f"/ca/{root.id}/download?format=key", follow_redirects=True)
+        assert b"must be submitted via POST" in resp.data
+
+    def test_get_pkcs12_export_refused(self, auth_admin, ca_pair):
+        root, _ = ca_pair
+        resp = auth_admin.get(
+            f"/ca/{root.id}/download?format=pkcs12&password=inurl", follow_redirects=True
+        )
+        assert b"must be submitted via POST" in resp.data
+
+    def test_pkcs12_password_ignored_from_query_string(self, auth_admin, ca_pair):
+        """POST with the password only in the query string must NOT be used —
+        the export-password-required guard fires because the form is empty."""
+        _, inter = ca_pair
+        resp = auth_admin.post(
+            f"/ca/{inter.id}/download?password=leaky",
+            data={"format": "pkcs12"},  # no password in the form body
+            follow_redirects=True,
+        )
+        assert b"export password is required" in resp.data
+
+
 class TestExportImportRoundTrip:
     def test_pem_chain_and_key_round_trip(self, auth_admin, ca_pair, db):
         """Export chain+key over HTTP, wipe the CAs, re-import via the
         upload form, then issue a certificate from the restored CA."""
         root, inter = ca_pair
         chain_pem = auth_admin.get(f"/ca/{inter.id}/download?format=chain").data.decode()
-        key_pem = auth_admin.get(f"/ca/{inter.id}/download?format=key").data.decode()
+        key_pem = auth_admin.post(
+            f"/ca/{inter.id}/download", data={"format": "key"}
+        ).data.decode()
 
         db.session.delete(inter)
         db.session.delete(root)
