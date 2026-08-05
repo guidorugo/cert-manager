@@ -8,6 +8,11 @@ break-glass admin.
 Follows the audit_service convention: may log audit entries but never
 commits; callers commit as part of their transaction.
 """
+import hashlib
+import hmac
+import os
+import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -131,3 +136,101 @@ def _sync_role(user, role):
         target_id=user.id,
         details={"username": user.username, "old_role": old_role, "new_role": role},
     )
+
+
+class CredentialCache:
+    """Short-TTL in-memory cache of verified Basic Auth credentials.
+
+    Basic Auth is stateless, so without a cache every request pays a full
+    credential verification: an LDAP bind for directory users, an expensive
+    password-hash check for local ones. This cache stores an HMAC of the
+    credentials (never the password; the HMAC key is random per process) keyed
+    by username, together with the verified user id and auth backend.
+
+    A hit only skips the credential verification — the User row is re-read on
+    every request, so deactivation, role changes, and deletion apply
+    immediately. Failed authentications are never cached. A TTL of 0 disables
+    caching entirely.
+    """
+
+    def __init__(self, ttl_seconds, max_entries=256):
+        self._ttl = ttl_seconds
+        self._max = max_entries
+        self._key = os.urandom(32)  # per-process; cache empties on restart
+        self._entries = {}  # username -> (mac, user_id, auth_method, expires_at)
+        self._lock = threading.Lock()
+
+    @property
+    def enabled(self):
+        return self._ttl > 0
+
+    def _mac(self, username, password):
+        message = f"{username}\x00{password}".encode()
+        return hmac.new(self._key, message, hashlib.sha256).digest()
+
+    def get(self, username, password):
+        """Return (user_id, auth_method) for a valid cached entry, else None."""
+        if not self.enabled:
+            return None
+        now = time.monotonic()
+        with self._lock:
+            entry = self._entries.get(username)
+            if entry is None:
+                return None
+            mac, user_id, auth_method, expires_at = entry
+            if now >= expires_at:
+                del self._entries[username]
+                return None
+            if not hmac.compare_digest(mac, self._mac(username, password)):
+                # Wrong password: miss, but keep the valid entry in place so
+                # probing cannot evict a legitimate client's cache.
+                return None
+            return user_id, auth_method
+
+    def put(self, username, password, user_id, auth_method):
+        if not self.enabled:
+            return
+        now = time.monotonic()
+        with self._lock:
+            if username not in self._entries and len(self._entries) >= self._max:
+                expired = [u for u, e in self._entries.items() if e[3] <= now]
+                for u in expired:
+                    del self._entries[u]
+                if len(self._entries) >= self._max:
+                    oldest = min(self._entries, key=lambda u: self._entries[u][3])
+                    del self._entries[oldest]
+            self._entries[username] = (
+                self._mac(username, password), user_id, auth_method, now + self._ttl,
+            )
+
+    def clear(self):
+        with self._lock:
+            self._entries.clear()
+
+
+def authenticate_basic(username, password):
+    """Authenticate Basic Auth credentials through the credential cache.
+
+    Same semantics as authenticate() — local first, then LDAP — but a recent
+    successful verification of the same credentials skips the expensive part
+    (LDAP bind / password hash). The User row is still fetched fresh, so a
+    cache hit never resurrects a deactivated, renamed, or deleted account.
+    """
+    if not username or not password:
+        _burn_hash()
+        return AuthResult(None, REASON_INVALID, "local")
+
+    cache = getattr(current_app, "basic_auth_cache", None)
+    if cache is not None:
+        hit = cache.get(username, password)
+        if hit is not None:
+            user_id, auth_method = hit
+            user = db.session.get(User, user_id)
+            if user is not None and user.username == username and user.is_active:
+                return AuthResult(user, None, auth_method)
+            # Stale entry — fall through to a full authentication.
+
+    result = authenticate(username, password)
+    if result.ok and cache is not None:
+        cache.put(username, password, result.user.id, result.auth_method)
+    return result

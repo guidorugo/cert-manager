@@ -37,7 +37,9 @@
             <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
             <td>
                 <a href="{{ url_for('users.edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                {% if not user.is_ldap_user %}
                 <a href="{{ url_for('users.reset_password', user_id=user.id) }}" class="btn btn-sm btn-outline-warning">Reset Password</a>
+                {% endif %}
                 {% if user.id != current_user.id %}
                 <form method="POST" action="{{ url_for('users.toggle_active', user_id=user.id) }}" class="d-inline">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

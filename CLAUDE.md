@@ -59,7 +59,7 @@ python -m pytest tests/ -v
 - **Dark theme**: Bootstrap 5.3 `data-bs-theme`-based. An inline head script applies the saved theme (`localStorage` key `theme`) or the OS `prefers-color-scheme` before first paint; `.theme-toggle` buttons (navbar when logged in, floating top-right otherwise) switch and persist it. Use adaptive utility classes (`bg-body-tertiary`, `text-body-secondary`) in templates — never light-only ones like `bg-light`/`text-muted`.
 - **Public endpoints**: CRL download and CA cert download require no auth.
 - **Database**: SQLite, stored in `./data/` (Docker volume).
-- **LDAP login (Phase 1)**: Optional LDAP auth for the session login via `auth_service.authenticate()` — local accounts first (break-glass admin works with LDAP down), then LDAP when `LDAP_ENABLED=true`. Two modes (exactly one must be configured): direct bind (`LDAP_USER_DN_TEMPLATE`) or search+bind (`LDAP_BIND_DN` + `LDAP_USER_SEARCH_BASE`). Group DNs map to roles (`LDAP_ADMIN_GROUP_DN` → admin, `LDAP_REQUESTER_GROUP_DN` → csr_requester; the requester group is a required-membership gate when set). LDAP users are auto-provisioned with `auth_source='ldap'` and the unusable-password sentinel (`!`), role re-synced each login, local deactivation wins. Empty passwords rejected before bind (anonymous-bind pitfall); filter/DN inputs escaped. Basic Auth for LDAP users is Phase 2.
+- **LDAP login (Phase 1)**: Optional LDAP auth for the session login via `auth_service.authenticate()` — local accounts first (break-glass admin works with LDAP down), then LDAP when `LDAP_ENABLED=true`. Two modes (exactly one must be configured): direct bind (`LDAP_USER_DN_TEMPLATE`) or search+bind (`LDAP_BIND_DN` + `LDAP_USER_SEARCH_BASE`). Group DNs map to roles (`LDAP_ADMIN_GROUP_DN` → admin, `LDAP_REQUESTER_GROUP_DN` → csr_requester; the requester group is a required-membership gate when set). LDAP users are auto-provisioned with `auth_source='ldap'` and the unusable-password sentinel (`!`), role re-synced each login, local deactivation wins. Empty passwords rejected before bind (anonymous-bind pitfall); filter/DN inputs escaped. Basic Auth works for LDAP users too via `auth_service.authenticate_basic()` with a per-process HMAC credential cache (`BASIC_AUTH_CACHE_TTL_SECONDS`, default 60s, 0 disables); cache hits skip the bind but re-read the User row so deactivation applies immediately; directory outage → HTTP 503 for LDAP-backed Basic Auth.
 
 ## Roles & Access Control
 - **admin**: Full access to all routes (CAs, certificates, CSR signing/rejection, user management, audit log).
@@ -108,6 +108,7 @@ python -m pytest tests/ -v
 - `RATE_LIMIT_DEFAULT` - Default rate limit when enabled (default: 60/minute)
 - `BASIC_AUTH_ENABLED` - Enable HTTP Basic Auth (default: true)
 - `BASIC_AUTH_REALM` - Basic Auth realm name (default: cert-manager)
+- `BASIC_AUTH_CACHE_TTL_SECONDS` - In-memory cache TTL for verified Basic Auth credentials (default: 60, 0 disables)
 - `OCSP_URL_SCHEME` - URL scheme for OCSP AIA URLs in certificates (default: http, use https in production)
 - `SESSION_COOKIE_SECURE` - Send session cookie only over HTTPS (default: false, set to true in production)
 - `LDAP_ENABLED` - Enable LDAP login (default: false)
