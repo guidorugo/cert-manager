@@ -18,6 +18,7 @@ A web-based X.509 Certificate Authority management application built with Python
 - **HTTP Basic Auth**: Stateless API access via `curl -u user:pass` for scripts and automation, alongside session-based browser auth
 - **Dark Theme**: Light/dark mode toggle with OS-preference default and per-browser persistence
 - **Security**: Private keys encrypted at rest with Fernet (PBKDF2-derived key, 600k iterations), session hardening, insecure-default rejection
+- **LDAP Login**: Optional LDAP/Active Directory authentication with group-to-role mapping and automatic user provisioning
 
 ## Quick Start
 
@@ -254,6 +255,28 @@ python -m pytest tests/ -v
 | `BASIC_AUTH_REALM` | `cert-manager` | Basic Auth realm name in `WWW-Authenticate` header |
 | `OCSP_URL_SCHEME` | `http` | URL scheme for OCSP AIA URLs in certificates (`https` recommended for production) |
 | `SESSION_COOKIE_SECURE` | `false` | Send session cookie only over HTTPS (set to `true` in production) |
+| `LDAP_ENABLED` | `false` | Enable LDAP authentication for the web login |
+| `LDAP_SERVER_URI` | – | LDAP server URI(s), e.g. `ldaps://dc01:636` (comma-separated for failover) |
+| `LDAP_USE_STARTTLS` | `false` | Upgrade `ldap://` connections with StartTLS |
+| `LDAP_TLS_VERIFY` | `true` | Verify the directory's TLS certificate |
+| `LDAP_CA_CERT_FILE` | – | CA bundle for verifying the directory's certificate |
+| `LDAP_USER_DN_TEMPLATE` | – | Direct-bind DN template, e.g. `uid={username},ou=people,dc=example,dc=com` |
+| `LDAP_BIND_DN` / `LDAP_BIND_PASSWORD` | – | Service account for search+bind mode |
+| `LDAP_USER_SEARCH_BASE` | – | Search base for search+bind mode |
+| `LDAP_USER_FILTER` | `(uid={username})` | User search filter (`(sAMAccountName={username})` for AD) |
+| `LDAP_ADMIN_GROUP_DN` | – | Members of this group get the `admin` role |
+| `LDAP_REQUESTER_GROUP_DN` | – | Members get `csr_requester`; when set, membership in one of the groups is required |
+| `LDAP_GROUP_MEMBER_ATTR` | `memberOf` | Attribute holding the user's group DNs |
+| `LDAP_TIMEOUT_SECONDS` | `5` | Connect/receive timeout for directory operations |
+
+### LDAP Authentication
+
+When `LDAP_ENABLED=true`, the web login checks the local database first (so the bootstrap admin always works, even with the directory down) and then falls back to LDAP. Directory users are auto-provisioned on first login with a role derived from group membership, re-synced on every login. Notes:
+
+- Choose **one** mode: direct bind (`LDAP_USER_DN_TEMPLATE`) or search+bind (`LDAP_BIND_DN` + `LDAP_USER_SEARCH_BASE`). The app refuses to start with both or neither.
+- Locally deactivating an LDAP user blocks them regardless of directory state.
+- LDAP accounts have no local password: password reset is disabled for them, and HTTP Basic Auth (`curl -u`) currently works for local accounts only.
+- Empty passwords are rejected before any bind (prevents the LDAP anonymous-bind pitfall), and usernames are escaped against LDAP filter injection.
 
 ## Architecture
 
