@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 
@@ -7,11 +9,24 @@ from ..services.audit_service import sanitize_username_for_log
 
 
 def _is_safe_url(target):
-    """Reject absolute URLs that redirect off-site."""
+    """Only allow a same-site, path-only relative redirect target.
+
+    C5: a bare `startswith('/')` check let `/\\evil.com` through — browsers
+    normalize the backslash to `/`, yielding a protocol-relative off-site
+    redirect. Reject backslashes/control chars and require an empty scheme
+    and host.
+    """
     if not target:
         return False
-    # Only allow paths starting with a single / (reject // protocol-relative URLs)
-    return target.startswith("/") and not target.startswith("//")
+    if "\\" in target or any(ord(c) < 0x20 for c in target):
+        return False
+    parts = urlsplit(target)
+    return (
+        not parts.scheme
+        and not parts.netloc
+        and target.startswith("/")
+        and not target.startswith("//")
+    )
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 

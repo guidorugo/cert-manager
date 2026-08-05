@@ -12,6 +12,9 @@ class TestConfig(Config):
     SECRET_KEY = "test-secret"
     MASTER_PASSPHRASE = "test-passphrase"
     WTF_CSRF_ENABLED = False
+    # The test client runs over HTTP; secure cookies would not persist, so
+    # opt out (mirrors the plain-HTTP reference deployment).
+    SESSION_COOKIE_SECURE = False
 
 
 @pytest.fixture(scope="session")

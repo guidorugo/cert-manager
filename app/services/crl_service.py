@@ -23,7 +23,17 @@ REVOCATION_REASONS = {
 }
 
 
-def revoke_certificate(cert_id, reason="unspecified"):
+def refresh_crl(ca, passphrase):
+    """Regenerate and cache the CRL for a CA that holds a signing key.
+
+    No-op (returns None) for certificate-only CAs, which cannot sign a CRL.
+    """
+    if not ca or not ca.private_key_enc:
+        return None
+    return generate_crl(ca, passphrase)
+
+
+def revoke_certificate(cert_id, reason="unspecified", passphrase=None):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
         raise ValueError("Certificate not found")
@@ -34,10 +44,15 @@ def revoke_certificate(cert_id, reason="unspecified"):
     certificate.revoked_at = datetime.now(timezone.utc)
     certificate.revocation_reason = reason
     db.session.commit()
+
+    # B2: publish the revocation immediately by regenerating the issuing CA's
+    # CRL, instead of serving a stale cached CRL until a manual regeneration.
+    if passphrase is not None:
+        refresh_crl(certificate.ca, passphrase)
     return certificate
 
 
-def revoke_ca(ca_id, reason="unspecified"):
+def revoke_ca(ca_id, reason="unspecified", passphrase=None):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
         raise ValueError("CA not found")
@@ -47,6 +62,7 @@ def revoke_ca(ca_id, reason="unspecified"):
     now = datetime.now(timezone.utc)
     certs_revoked = 0
     sub_cas_revoked = 0
+    revoked_cas = []
 
     def _revoke_ca_recursive(target_ca):
         nonlocal certs_revoked, sub_cas_revoked
@@ -54,6 +70,7 @@ def revoke_ca(ca_id, reason="unspecified"):
         target_ca.is_revoked = True
         target_ca.revoked_at = now
         target_ca.revocation_reason = reason
+        revoked_cas.append(target_ca)
 
         # Revoke all non-revoked certificates issued by this CA
         active_certs = Certificate.query.filter_by(ca_id=target_ca.id, is_revoked=False).all()
@@ -71,6 +88,13 @@ def revoke_ca(ca_id, reason="unspecified"):
 
     _revoke_ca_recursive(ca)
     db.session.commit()
+
+    if passphrase is not None:
+        # B3: the parent's CRL must now list the revoked intermediate.
+        refresh_crl(ca.parent, passphrase)
+        # Publish each revoked CA's own CRL (its now-revoked leaf certs).
+        for rca in revoked_cas:
+            refresh_crl(rca, passphrase)
     return ca, certs_revoked, sub_cas_revoked
 
 
@@ -102,15 +126,24 @@ def generate_crl(ca, passphrase, validity_days=7):
         )
     )
 
-    revoked_certs = Certificate.query.filter_by(ca_id=ca.id, is_revoked=True).all()
-    for cert in revoked_certs:
+    # Revoked leaf certificates issued by this CA, plus (B3) revoked sub-CAs
+    # this CA issued — a revoked intermediate must appear on its parent's CRL.
+    revoked_entries = [
+        (c.serial_number, c.revoked_at, c.revocation_reason)
+        for c in Certificate.query.filter_by(ca_id=ca.id, is_revoked=True).all()
+    ]
+    revoked_entries += [
+        (sub.serial_number, sub.revoked_at, sub.revocation_reason)
+        for sub in CertificateAuthority.query.filter_by(parent_id=ca.id, is_revoked=True).all()
+    ]
+    for serial_hex, revoked_at, reason_str in revoked_entries:
         revoked_builder = (
             x509.RevokedCertificateBuilder()
-            .serial_number(int(cert.serial_number, 16))
-            .revocation_date(cert.revoked_at or now)
+            .serial_number(int(serial_hex, 16))
+            .revocation_date(revoked_at or now)
         )
 
-        reason = REVOCATION_REASONS.get(cert.revocation_reason, x509.ReasonFlags.unspecified)
+        reason = REVOCATION_REASONS.get(reason_str, x509.ReasonFlags.unspecified)
         revoked_builder = revoked_builder.add_extension(
             x509.CRLReason(reason),
             critical=False,
