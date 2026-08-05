@@ -113,7 +113,13 @@ python -m pytest tests/ -v
 - `BASIC_AUTH_REALM` - Basic Auth realm name (default: cert-manager)
 - `BASIC_AUTH_CACHE_TTL_SECONDS` - In-memory cache TTL for verified Basic Auth credentials (default: 60, 0 disables)
 - `OCSP_URL_SCHEME` - URL scheme for OCSP AIA URLs in certificates (default: http, use https in production)
-- `SESSION_COOKIE_SECURE` - Send session cookie only over HTTPS (default: false, set to true in production)
+- `SESSION_COOKIE_SECURE` - Send session cookie only over HTTPS (default: **true**; the HTTP reference compose overrides to false)
+- `TRUSTED_PROXY_COUNT` - Trusted reverse-proxy hop count for ProxyFix (default: 0 = directly exposed; do not trust XFF)
+- `MAX_CONTENT_LENGTH_BYTES` - Max request body size (default: 1048576)
+- `MAX_CERT_VALIDITY_DAYS` / `MAX_CA_VALIDITY_DAYS` - Issuance validity caps (default: 825 / 7305); certs are also clamped to the issuing CA's expiry
+- `MIN_RSA_KEY_SIZE` - Minimum RSA key size accepted (default: 2048)
+- `OCSP_KEY_CACHE_TTL_SECONDS` - In-memory TTL for the decrypted CA signing key used by OCSP (default: 300, 0 disables)
+- `MASTER_PASSPHRASE_FILE` / `SECRET_KEY_FILE` / `ADMIN_PASSWORD_FILE` - Read the secret from a file (Docker/systemd secret) instead of the env var
 - `LDAP_ENABLED` - Enable LDAP login (default: false)
 - `LDAP_SERVER_URI` - Directory URI(s), comma-separated for failover (e.g. `ldaps://dc01:636`)
 - `LDAP_USE_STARTTLS` / `LDAP_TLS_VERIFY` / `LDAP_CA_CERT_FILE` - TLS options (verify defaults to true)

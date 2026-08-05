@@ -2,18 +2,57 @@ import os
 from datetime import timedelta
 
 
+def _read_secret(name, default=None):
+    """Read a secret from `{name}_FILE` (Docker/systemd secret) if set,
+    otherwise the `{name}` env var, otherwise `default`.
+
+    The file convention keeps high-value secrets (MASTER_PASSPHRASE,
+    SECRET_KEY) out of the process environment — so they don't appear in
+    `docker inspect`, `/proc/<pid>/environ`, or the compose `.env`.
+    """
+    path = os.environ.get(f"{name}_FILE")
+    if path:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read().strip()
+    return os.environ.get(name, default)
+
+
 class Config:
-    SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
-    MASTER_PASSPHRASE = os.environ.get("MASTER_PASSPHRASE", "dev-passphrase")
+    SECRET_KEY = _read_secret("SECRET_KEY", "dev-secret-key")
+    MASTER_PASSPHRASE = _read_secret("MASTER_PASSPHRASE", "dev-passphrase")
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", "sqlite:///cert-manager.db")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-    ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
+    ADMIN_PASSWORD = _read_secret("ADMIN_PASSWORD", "admin")
     SERVER_NAME_FOR_OCSP = os.environ.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
+
+    # Cap request bodies to blunt memory-exhaustion DoS (C2). OCSP/CRL/import
+    # payloads are all small; 1 MB is generous.
+    MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH_BYTES") or str(1024 * 1024))
 
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
-    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
+    # Secure-by-default (L1): cookies are only sent over HTTPS. The reference
+    # docker-compose runs plain HTTP and sets this false explicitly; put a TLS
+    # proxy in front and leave it true in production.
+    SESSION_COOKIE_SECURE = (os.environ.get("SESSION_COOKIE_SECURE") or "true").lower() == "true"
+
+    # Number of trusted reverse-proxy hops (G2). 0 = app is directly exposed,
+    # use remote_addr as-is (do NOT trust X-Forwarded-For). Set to 1 when
+    # behind a single TLS-terminating proxy so audit/rate-limit see real IPs.
+    TRUSTED_PROXY_COUNT = int(os.environ.get("TRUSTED_PROXY_COUNT") or "0")
+
+    # Issuance policy limits (B4). not_after is always additionally clamped to
+    # the issuing CA's own not_after in the services.
+    MAX_CERT_VALIDITY_DAYS = int(os.environ.get("MAX_CERT_VALIDITY_DAYS") or "825")
+    MAX_CA_VALIDITY_DAYS = int(os.environ.get("MAX_CA_VALIDITY_DAYS") or "7305")
+    # Minimum RSA key size accepted anywhere keys are generated/signed (B5).
+    MIN_RSA_KEY_SIZE = int(os.environ.get("MIN_RSA_KEY_SIZE") or "2048")
+
+    # Cache the decrypted CA signing key in memory for this many seconds so an
+    # unauthenticated OCSP flood doesn't run 600k-PBKDF2 per request (C1).
+    # 0 disables the cache (decrypt every request).
+    OCSP_KEY_CACHE_TTL_SECONDS = int(os.environ.get("OCSP_KEY_CACHE_TTL_SECONDS") or "300")
 
     OCSP_URL_SCHEME = os.environ.get("OCSP_URL_SCHEME", "http")
     PERMANENT_SESSION_LIFETIME = timedelta(
