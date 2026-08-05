@@ -15,10 +15,15 @@
         <div class="btn-group">
             <a href="{{ url_for('public.download_ca_cert', ca_id=ca.id) }}" class="btn btn-outline-primary btn-sm">Cert</a>
             <a href="{{ url_for('ca.download', ca_id=ca.id, format='chain') }}" class="btn btn-outline-primary btn-sm">Chain</a>
-            {% if ca.has_private_key %}
-            <a href="{{ url_for('ca.download', ca_id=ca.id, format='key') }}" class="btn btn-outline-warning btn-sm">Key</a>
-            {% endif %}
         </div>
+        {% if ca.has_private_key %}
+        {# Private-key export is POST-only so the key PEM never lands in a GET URL/log #}
+        <form method="POST" action="{{ url_for('ca.download', ca_id=ca.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="format" value="key">
+            <button type="submit" class="btn btn-outline-warning btn-sm">Key</button>
+        </form>
+        {% endif %}
         {% if not ca.is_revoked %}
         {% if ca.has_private_key %}
         <form method="POST" action="{{ url_for('ca.generate_crl', ca_id=ca.id) }}" class="d-inline">
