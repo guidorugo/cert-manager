@@ -138,7 +138,7 @@ class TestTimingAttack:
     """Login timing attack mitigation."""
 
     def test_dummy_hash_called_for_nonexistent_user(self, client):
-        with patch("app.routes.auth.generate_password_hash") as mock_hash:
+        with patch("app.services.auth_service.generate_password_hash") as mock_hash:
             client.post(
                 "/auth/login",
                 data={"username": "nonexistent_user_xyz", "password": "anypass"},

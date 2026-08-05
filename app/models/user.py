@@ -6,6 +6,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from ..extensions import db, login_manager
 
+# Sentinel stored in password_hash for externally-authenticated (LDAP) users.
+# Never a valid werkzeug hash, and check_password() short-circuits on it.
+UNUSABLE_PASSWORD = "!"
+
 
 class User(UserMixin, db.Model):
     __tablename__ = "users"
@@ -15,6 +19,7 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="csr_requester")
     is_active_user = db.Column(db.Boolean, nullable=False, default=True)
+    auth_source = db.Column(db.String(10), nullable=False, default="local")
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     @property
@@ -29,10 +34,23 @@ class User(UserMixin, db.Model):
     def is_csr_requester(self):
         return self.role == "csr_requester"
 
+    @property
+    def is_ldap_user(self):
+        return self.auth_source == "ldap"
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
+    def set_unusable_password(self):
+        """Mark the account as externally authenticated (no local password)."""
+        self.password_hash = UNUSABLE_PASSWORD
+
+    def has_usable_password(self):
+        return self.password_hash != UNUSABLE_PASSWORD
+
     def check_password(self, password):
+        if not self.has_usable_password():
+            return False
         return check_password_hash(self.password_hash, password)
 
     def __repr__(self):
@@ -44,6 +62,9 @@ class User(UserMixin, db.Model):
 
         Performs a dummy hash check for nonexistent users to prevent
         timing-based username enumeration.
+
+        LDAP-provisioned accounts have no usable local password and are
+        therefore always rejected here (LDAP Basic Auth is Phase 2).
         """
         user = User.query.filter_by(username=username).first()
         if user is None:
