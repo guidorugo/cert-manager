@@ -118,6 +118,10 @@ def reset_password(user_id):
         flash("User not found.", "danger")
         return redirect(url_for("users.list_users"))
 
+    if user.is_ldap_user:
+        flash("Cannot set a local password for an LDAP-managed user.", "warning")
+        return redirect(url_for("users.list_users"))
+
     if request.method == "POST":
         new_password = request.form.get("password", "")
         if not new_password:

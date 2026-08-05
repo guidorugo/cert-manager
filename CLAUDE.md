@@ -58,6 +58,7 @@ python -m pytest tests/ -v
 - **Certificate profiles**: Both certificate creation and CSR signing forms have a collapsible Advanced Settings section with profile presets (Web Server, Client Auth, Email/S-MIME, Code Signing, Custom) that configure Key Usage and Extended Key Usage checkboxes. Default profile (Web Server) matches previous hardcoded defaults for backward compatibility.
 - **Public endpoints**: CRL download and CA cert download require no auth.
 - **Database**: SQLite, stored in `./data/` (Docker volume).
+- **LDAP login (Phase 1)**: Optional LDAP auth for the session login via `auth_service.authenticate()` — local accounts first (break-glass admin works with LDAP down), then LDAP when `LDAP_ENABLED=true`. Two modes (exactly one must be configured): direct bind (`LDAP_USER_DN_TEMPLATE`) or search+bind (`LDAP_BIND_DN` + `LDAP_USER_SEARCH_BASE`). Group DNs map to roles (`LDAP_ADMIN_GROUP_DN` → admin, `LDAP_REQUESTER_GROUP_DN` → csr_requester; the requester group is a required-membership gate when set). LDAP users are auto-provisioned with `auth_source='ldap'` and the unusable-password sentinel (`!`), role re-synced each login, local deactivation wins. Empty passwords rejected before bind (anonymous-bind pitfall); filter/DN inputs escaped. Basic Auth for LDAP users is Phase 2.
 
 ## Roles & Access Control
 - **admin**: Full access to all routes (CAs, certificates, CSR signing/rejection, user management, audit log).
@@ -108,3 +109,11 @@ python -m pytest tests/ -v
 - `BASIC_AUTH_REALM` - Basic Auth realm name (default: cert-manager)
 - `OCSP_URL_SCHEME` - URL scheme for OCSP AIA URLs in certificates (default: http, use https in production)
 - `SESSION_COOKIE_SECURE` - Send session cookie only over HTTPS (default: false, set to true in production)
+- `LDAP_ENABLED` - Enable LDAP login (default: false)
+- `LDAP_SERVER_URI` - Directory URI(s), comma-separated for failover (e.g. `ldaps://dc01:636`)
+- `LDAP_USE_STARTTLS` / `LDAP_TLS_VERIFY` / `LDAP_CA_CERT_FILE` - TLS options (verify defaults to true)
+- `LDAP_USER_DN_TEMPLATE` - Direct-bind DN template with `{username}` placeholder
+- `LDAP_BIND_DN` / `LDAP_BIND_PASSWORD` / `LDAP_USER_SEARCH_BASE` / `LDAP_USER_FILTER` - Search+bind mode
+- `LDAP_ADMIN_GROUP_DN` / `LDAP_REQUESTER_GROUP_DN` - Group-to-role mapping DNs
+- `LDAP_GROUP_MEMBER_ATTR` - Group membership attribute (default: memberOf)
+- `LDAP_TIMEOUT_SECONDS` - Directory connect/receive timeout (default: 5)

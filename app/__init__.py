@@ -17,6 +17,7 @@ def create_app(config_class=Config):
     csrf.init_app(app)
 
     _check_security(app)
+    _validate_ldap_config(app)
     _configure_session(app)
     _setup_security_headers(app)
     _setup_rate_limiting(app)
@@ -127,6 +128,37 @@ def _check_security(app):
         sys.exit(1)
 
 
+def _validate_ldap_config(app):
+    """Fail fast on an unusable LDAP configuration (runs in every mode)."""
+    if not app.config.get("LDAP_ENABLED"):
+        return
+
+    def fatal(msg):
+        print(f"FATAL: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    if not app.config.get("LDAP_SERVER_URI"):
+        fatal("LDAP_ENABLED is true but LDAP_SERVER_URI is not set.")
+
+    template = app.config.get("LDAP_USER_DN_TEMPLATE")
+    search_base = app.config.get("LDAP_USER_SEARCH_BASE")
+
+    if template and search_base:
+        fatal("Set either LDAP_USER_DN_TEMPLATE (direct bind) or "
+              "LDAP_USER_SEARCH_BASE (search+bind), not both.")
+    if not template and not search_base:
+        fatal("LDAP_ENABLED is true but neither LDAP_USER_DN_TEMPLATE nor "
+              "LDAP_USER_SEARCH_BASE is set.")
+    if template and "{username}" not in template:
+        fatal("LDAP_USER_DN_TEMPLATE must contain a {username} placeholder.")
+    if search_base:
+        if "{username}" not in app.config.get("LDAP_USER_FILTER", ""):
+            fatal("LDAP_USER_FILTER must contain a {username} placeholder.")
+        if not app.config.get("LDAP_BIND_DN") or not app.config.get("LDAP_BIND_PASSWORD"):
+            fatal("Search+bind mode requires LDAP_BIND_DN and LDAP_BIND_PASSWORD "
+                  "(anonymous directory search is not supported).")
+
+
 def _setup_security_headers(app):
     """Add security response headers to all responses."""
 
@@ -182,6 +214,10 @@ def _migrate_schema():
         if "is_active_user" not in columns:
             db.session.execute(text(
                 "ALTER TABLE users ADD COLUMN is_active_user BOOLEAN NOT NULL DEFAULT 1"
+            ))
+        if "auth_source" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE users ADD COLUMN auth_source VARCHAR(10) NOT NULL DEFAULT 'local'"
             ))
 
     # Migrate certificate_authorities table
