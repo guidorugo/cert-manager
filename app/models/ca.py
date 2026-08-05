@@ -30,5 +30,15 @@ class CertificateAuthority(db.Model):
     certificates = db.relationship("Certificate", backref="ca", lazy="dynamic")
     csrs = db.relationship("CertificateSigningRequest", backref="ca", lazy="dynamic")
 
+    @property
+    def has_private_key(self):
+        """False for CAs imported certificate-only (empty-bytes sentinel)."""
+        return bool(self.private_key_enc)
+
+    @classmethod
+    def signing_capable(cls):
+        """Query for CAs that can sign: not revoked and holding a private key."""
+        return cls.query.filter_by(is_revoked=False).filter(cls.private_key_enc != b"")
+
     def __repr__(self):
         return f"<CA {self.name}>"

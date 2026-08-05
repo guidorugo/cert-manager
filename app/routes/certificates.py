@@ -61,27 +61,27 @@ def create():
         except (ValueError, TypeError):
             flash("CA ID, key size, and validity days must be valid numbers.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   cas=CertificateAuthority.signing_capable().all(),
                                    ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
         san_raw = request.form.get("san", "").strip()
 
         if not cn:
             flash("Common Name is required.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   cas=CertificateAuthority.signing_capable().all(),
                                    ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
             flash("CA not found.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   cas=CertificateAuthority.signing_capable().all(),
                                    ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         if ca.is_revoked:
             flash("Cannot issue certificates from a revoked CA.", "danger")
             return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   cas=CertificateAuthority.signing_capable().all(),
                                    ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         subject_attrs = {
@@ -119,7 +119,7 @@ def create():
             }
             if not any(key_usage.values()):
                 flash("At least one Key Usage must be selected.", "danger")
-                cas = CertificateAuthority.query.filter_by(is_revoked=False).all()
+                cas = CertificateAuthority.signing_capable().all()
                 return render_template("certificates/create.html", cas=cas,
                                        ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
@@ -144,7 +144,7 @@ def create():
             logger.exception("Error creating certificate")
             flash("An unexpected error occurred while creating the certificate.", "danger")
 
-    cas = CertificateAuthority.query.all()
+    cas = CertificateAuthority.signing_capable().all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
     if server == "localhost:5000":
         server = request.host

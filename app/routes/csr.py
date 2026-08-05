@@ -142,20 +142,20 @@ def sign(csr_id):
         except (ValueError, TypeError):
             flash("CA ID and validity days must be valid numbers.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   cas=CertificateAuthority.signing_capable().all(),
                                    ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
             flash("CA not found.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   cas=CertificateAuthority.signing_capable().all(),
                                    ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         if ca.is_revoked:
             flash("Cannot sign CSR with a revoked CA.", "danger")
             return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                   cas=CertificateAuthority.signing_capable().all(),
                                    ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         passphrase = current_app.config["MASTER_PASSPHRASE"]
@@ -188,7 +188,7 @@ def sign(csr_id):
             if not any(key_usage.values()):
                 flash("At least one Key Usage must be selected.", "danger")
                 return render_template("csr/sign.html", csr=csr_model,
-                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all(),
+                                       cas=CertificateAuthority.signing_capable().all(),
                                        ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
 
         if has_eku_fields:
@@ -212,7 +212,7 @@ def sign(csr_id):
             logger.exception("Error signing CSR")
             flash("An unexpected error occurred while signing the CSR.", "danger")
 
-    cas = CertificateAuthority.query.all()
+    cas = CertificateAuthority.signing_capable().all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
     if server == "localhost:5000":
         server = request.host

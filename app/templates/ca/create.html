@@ -45,7 +45,7 @@
                                 </label>
                                 <select class="form-select" id="parent_id" name="parent_id">
                                     <option value="">-- Select Parent CA --</option>
-                                    {% for ca in cas %}
+                                    {% for ca in signing_cas %}
                                     <option value="{{ ca.id }}">{{ ca.name }}</option>
                                     {% endfor %}
                                 </select>
@@ -151,6 +151,18 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="mode" value="upload">
 
+            <div class="mb-3">
+                <span class="form-label me-3">Source format:</span>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="import_format" id="fmt_pem" value="pem" checked onchange="toggleImportFormat()">
+                    <label class="form-check-label" for="fmt_pem">PEM</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="import_format" id="fmt_p12" value="pkcs12" onchange="toggleImportFormat()">
+                    <label class="form-check-label" for="fmt_p12">PKCS#12 (.p12/.pfx)</label>
+                </div>
+            </div>
+
             <div class="row">
                 <div class="col-md-6">
                     <div class="card mb-3">
@@ -168,7 +180,7 @@
                                 </label>
                                 <select class="form-select" id="upload_parent_id" name="upload_parent_id">
                                     <option value="">None (Root CA)</option>
-                                    {% for ca in cas %}
+                                    {% for ca in link_cas %}
                                     <option value="{{ ca.id }}">{{ ca.name }}</option>
                                     {% endfor %}
                                 </select>
@@ -177,13 +189,13 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-6" id="pem_import_section">
                     <div class="card mb-3">
                         <div class="card-header">Certificate</div>
                         <div class="card-body">
                             <div class="mb-3">
                                 <label for="cert_pem" class="form-label">Certificate PEM
-                                    <span class="field-info" data-bs-toggle="tooltip" title="Paste the CA certificate in PEM format (begins with -----BEGIN CERTIFICATE-----).">!</span>
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Paste the CA certificate in PEM format. May contain a full chain - parent certificates are imported automatically (certificate-only).">!</span>
                                 </label>
                                 <textarea class="form-control font-monospace" id="cert_pem" name="cert_pem" rows="8"
                                     placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
@@ -201,16 +213,48 @@
                         <div class="card-body">
                             <div class="mb-3">
                                 <label for="key_pem" class="form-label">Private Key PEM
-                                    <span class="field-info" data-bs-toggle="tooltip" title="Paste the unencrypted private key in PEM format (begins with -----BEGIN PRIVATE KEY-----).">!</span>
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Paste the private key in PEM format. Encrypted keys are supported - provide the key passphrase below.">!</span>
                                 </label>
                                 <textarea class="form-control font-monospace" id="key_pem" name="key_pem" rows="8"
                                     placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
                             </div>
                             <div class="mb-3">
                                 <label for="key_file" class="form-label">Upload key file
-                                    <span class="field-info" data-bs-toggle="tooltip" title="Upload a .pem or .key file containing the unencrypted private key.">!</span>
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Upload a .pem or .key file containing the private key (encrypted keys supported).">!</span>
                                 </label>
                                 <input type="file" class="form-control" id="key_file" name="key_file" accept=".pem,.key">
+                            </div>
+                            <div class="mb-3">
+                                <label for="key_passphrase" class="form-label">Key passphrase
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Only needed if the private key PEM is encrypted.">!</span>
+                                </label>
+                                <input type="password" class="form-control" id="key_passphrase" name="key_passphrase" autocomplete="off" placeholder="Leave empty for unencrypted keys">
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="cert_only" name="cert_only">
+                                <label class="form-check-label" for="cert_only">
+                                    Import certificate only (no private key)
+                                    <span class="field-info" data-bs-toggle="tooltip" title="For offline roots: the CA anchors chains and can parent imported intermediates, but cannot issue certificates, sign CRLs, or answer OCSP.">!</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6" id="p12_import_section" style="display:none">
+                    <div class="card mb-3">
+                        <div class="card-header">PKCS#12 Bundle</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="p12_file" class="form-label">PKCS#12 file
+                                    <span class="field-info" data-bs-toggle="tooltip" title="Upload a .p12 or .pfx bundle. The main certificate becomes this CA; bundled chain certificates are imported automatically (certificate-only).">!</span>
+                                </label>
+                                <input type="file" class="form-control" id="p12_file" name="p12_file" accept=".p12,.pfx">
+                            </div>
+                            <div class="mb-3">
+                                <label for="p12_password" class="form-label">Bundle password
+                                    <span class="field-info" data-bs-toggle="tooltip" title="The password protecting the PKCS#12 file. Leave empty if it has none.">!</span>
+                                </label>
+                                <input type="password" class="form-control" id="p12_password" name="p12_password" autocomplete="off" placeholder="Leave empty if not password-protected">
                             </div>
                         </div>
                     </div>
@@ -263,6 +307,19 @@ document.getElementById('key_file').addEventListener('change', function(e) {
         document.getElementById('key_pem').value = ev.target.result.trim();
     };
     reader.readAsText(file);
+});
+
+function toggleImportFormat() {
+    var isP12 = document.getElementById('fmt_p12').checked;
+    document.getElementById('pem_import_section').style.display = isP12 ? 'none' : 'block';
+    document.getElementById('p12_import_section').style.display = isP12 ? 'block' : 'none';
+}
+
+document.getElementById('cert_only').addEventListener('change', function() {
+    var disabled = this.checked;
+    ['key_pem', 'key_file', 'key_passphrase'].forEach(function(id) {
+        document.getElementById(id).disabled = disabled;
+    });
 });
 
 // Parent auto-detect with debounce
