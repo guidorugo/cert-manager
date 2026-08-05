@@ -13,10 +13,12 @@ login_manager.login_message_category = "warning"
 class ConditionalCSRFProtect(CSRFProtect):
     """CSRFProtect subclass that skips CSRF validation for Basic Auth requests."""
 
-    def protect(self):
+    # Accept and forward any arguments so the signature stays compatible with
+    # Flask-WTF's internal calls (1.3.0 added apply_exemptions=True).
+    def protect(self, *args, **kwargs):
         if getattr(g, "basic_auth_used", False):
             return
-        return super().protect()
+        return super().protect(*args, **kwargs)
 
 
 csrf = ConditionalCSRFProtect()
