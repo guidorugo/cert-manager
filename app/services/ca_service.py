@@ -9,11 +9,30 @@ from cryptography.x509.oid import NameOID, ExtensionOID
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from .crypto_utils import encrypt_private_key, decrypt_private_key
+from .policy import enforce_key_strength, bounded_not_after
 
 MAX_PEM_SIZE = 64 * 1024  # 64KB
 
 
+def _publish_initial_crl(ca, passphrase):
+    """Publish an initial CRL for a newly created/imported keyed CA so the
+    read-only public CRL endpoint (C1) always has something to serve.
+    Best-effort — the CA already exists; a failure just defers the CRL to the
+    admin 'Generate CRL' action or the first revocation.
+    """
+    if not ca or not ca.private_key_enc:
+        return
+    from . import crl_service
+    import logging
+    try:
+        crl_service.generate_crl(ca, passphrase)
+    except Exception:
+        db.session.rollback()
+        logging.getLogger(__name__).warning("Initial CRL generation failed for CA %s", ca.id)
+
+
 def _generate_key(key_type: str, key_size: int):
+    enforce_key_strength(key_type, key_size)
     if key_type == "RSA":
         return rsa.generate_private_key(public_exponent=65537, key_size=key_size)
     elif key_type == "EC":
@@ -50,6 +69,7 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
     subject = _build_subject(subject_attrs)
 
     now = datetime.now(timezone.utc)
+    not_after = bounded_not_after(now, validity_days, is_ca=True)  # B4
     serial = x509.random_serial_number()
 
     builder = (
@@ -59,7 +79,7 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
         .public_key(key.public_key())
         .serial_number(serial)
         .not_valid_before(now)
-        .not_valid_after(now + timedelta(days=validity_days))
+        .not_valid_after(not_after)
         .add_extension(
             x509.BasicConstraints(ca=True, path_length=path_length),
             critical=True,
@@ -103,11 +123,12 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
         key_type=key_type,
         key_size=key_size,
         not_before=now,
-        not_after=now + timedelta(days=validity_days),
+        not_after=not_after,
         path_length=path_length,
     )
     db.session.add(ca)
     db.session.commit()
+    _publish_initial_crl(ca, passphrase)
     return ca
 
 
@@ -122,6 +143,8 @@ def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
     parent_key = decrypt_private_key(parent_ca.private_key_enc, passphrase)
 
     now = datetime.now(timezone.utc)
+    # B4: bound to the CA maximum and never outlive the parent CA.
+    not_after = bounded_not_after(now, validity_days, parent_ca.not_after, is_ca=True)
     serial = x509.random_serial_number()
 
     builder = (
@@ -131,7 +154,7 @@ def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
         .public_key(key.public_key())
         .serial_number(serial)
         .not_valid_before(now)
-        .not_valid_after(now + timedelta(days=validity_days))
+        .not_valid_after(not_after)
         .add_extension(
             x509.BasicConstraints(ca=True, path_length=path_length),
             critical=True,
@@ -179,11 +202,12 @@ def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
         key_type=key_type,
         key_size=key_size,
         not_before=now,
-        not_after=now + timedelta(days=validity_days),
+        not_after=not_after,
         path_length=path_length,
     )
     db.session.add(ca)
     db.session.commit()
+    _publish_initial_crl(ca, passphrase)
     return ca
 
 
@@ -445,8 +469,10 @@ def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None, key_passphras
         ca = _import_ca_object(name, ordered[0], private_key, passphrase, parent_id=parent_id)
         db.session.commit()
         ca._imported_parents = []
-        return ca
-    return _import_chain(name, ordered, private_key, passphrase, parent_id=parent_id)
+    else:
+        ca = _import_chain(name, ordered, private_key, passphrase, parent_id=parent_id)
+    _publish_initial_crl(ca, passphrase)
+    return ca
 
 
 def export_ca_key_pem(ca, passphrase):
@@ -528,5 +554,7 @@ def import_pkcs12(name, p12_bytes, p12_password, passphrase, parent_id=None):
         ca = _import_ca_object(name, ordered[0], key, passphrase, parent_id=parent_id)
         db.session.commit()
         ca._imported_parents = []
-        return ca
-    return _import_chain(name, ordered, key, passphrase, parent_id=parent_id)
+    else:
+        ca = _import_chain(name, ordered, key, passphrase, parent_id=parent_id)
+    _publish_initial_crl(ca, passphrase)
+    return ca

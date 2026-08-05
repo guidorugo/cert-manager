@@ -97,17 +97,21 @@ def _map_role(groups):
 
     - Member of LDAP_ADMIN_GROUP_DN -> admin
     - Member of LDAP_REQUESTER_GROUP_DN -> csr_requester
-    - LDAP_REQUESTER_GROUP_DN set but user in neither group -> None
-      (rejected); the requester group acts as a required-membership gate.
-    - No requester group configured -> csr_requester by default.
+    - Any group gate configured but user in none of the mapped groups -> None
+      (rejected). D6: configuring only LDAP_ADMIN_GROUP_DN must NOT admit the
+      whole directory as csr_requester — a configured admin group also gates.
+    - No group gate configured at all -> csr_requester (open to any directory
+      user who can bind).
     """
     admin_group = (current_app.config.get("LDAP_ADMIN_GROUP_DN") or "").strip().lower()
     requester_group = (current_app.config.get("LDAP_REQUESTER_GROUP_DN") or "").strip().lower()
 
     if admin_group and admin_group in groups:
         return "admin"
-    if requester_group:
-        return "csr_requester" if requester_group in groups else None
+    if requester_group and requester_group in groups:
+        return "csr_requester"
+    if admin_group or requester_group:
+        return None  # a gate is configured and the user matched no mapped group
     return "csr_requester"
 
 

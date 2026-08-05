@@ -10,9 +10,11 @@ from cryptography.x509.oid import NameOID, ExtensionOID, ExtendedKeyUsageOID
 from ..extensions import db
 from ..models.certificate import Certificate
 from .crypto_utils import encrypt_private_key, decrypt_private_key
+from .policy import enforce_key_strength, enforce_public_key_strength, bounded_not_after
 
 
 def _generate_key(key_type: str, key_size: int):
+    enforce_key_strength(key_type, key_size)
     if key_type == "RSA":
         return rsa.generate_private_key(public_exponent=65537, key_size=key_size)
     elif key_type == "EC":
@@ -79,7 +81,14 @@ def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
     ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
     csr = x509.load_pem_x509_csr(csr_model.csr_pem.encode())
 
+    # Proof-of-possession (B1): the CSR must be validly self-signed, proving
+    # the requester holds the private key for the embedded public key.
+    if not csr.is_signature_valid:
+        raise ValueError("CSR signature is invalid (proof-of-possession failed); refusing to sign.")
+    enforce_public_key_strength(csr.public_key())  # B5
+
     now = datetime.now(timezone.utc)
+    not_after = bounded_not_after(now, validity_days, ca.not_after)  # B4
     serial = x509.random_serial_number()
 
     builder = (
@@ -89,7 +98,7 @@ def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
         .public_key(csr.public_key())
         .serial_number(serial)
         .not_valid_before(now)
-        .not_valid_after(now + timedelta(days=validity_days))
+        .not_valid_after(not_after)
         .add_extension(
             x509.BasicConstraints(ca=False, path_length=None),
             critical=True,
@@ -248,6 +257,7 @@ def create_certificate(ca, subject_attrs, san_list, validity_days, passphrase,
     subject = _build_subject(subject_attrs)
 
     now = datetime.now(timezone.utc)
+    not_after = bounded_not_after(now, validity_days, ca.not_after)  # B4
     serial = x509.random_serial_number()
 
     builder = (
@@ -257,7 +267,7 @@ def create_certificate(ca, subject_attrs, san_list, validity_days, passphrase,
         .public_key(key.public_key())
         .serial_number(serial)
         .not_valid_before(now)
-        .not_valid_after(now + timedelta(days=validity_days))
+        .not_valid_after(not_after)
         .add_extension(
             x509.BasicConstraints(ca=False, path_length=None),
             critical=True,
@@ -393,6 +403,8 @@ def export_pkcs12(certificate, passphrase, export_password):
 
     if not certificate.private_key_enc:
         raise ValueError("No private key available for this certificate")
+    if not export_password:
+        raise ValueError("An export password is required for PKCS#12.")
 
     key = decrypt_private_key(certificate.private_key_enc, passphrase)
 

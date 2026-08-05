@@ -258,7 +258,14 @@ python -m pytest tests/ -v
 | `BASIC_AUTH_REALM` | `cert-manager` | Basic Auth realm name in `WWW-Authenticate` header |
 | `BASIC_AUTH_CACHE_TTL_SECONDS` | `60` | In-memory cache TTL for verified Basic Auth credentials (`0` disables) |
 | `OCSP_URL_SCHEME` | `http` | URL scheme for OCSP AIA URLs in certificates (`https` recommended for production) |
-| `SESSION_COOKIE_SECURE` | `false` | Send session cookie only over HTTPS (set to `true` in production) |
+| `SESSION_COOKIE_SECURE` | `true` | Send session cookie only over HTTPS (the plain-HTTP reference compose overrides to `false`) |
+| `TRUSTED_PROXY_COUNT` | `0` | Trusted reverse-proxy hops for `ProxyFix` (0 = directly exposed; set to 1 behind one TLS proxy) |
+| `MAX_CONTENT_LENGTH_BYTES` | `1048576` | Maximum request body size |
+| `MAX_CERT_VALIDITY_DAYS` | `825` | Cap on issued leaf-cert validity (also clamped to the CA's expiry) |
+| `MAX_CA_VALIDITY_DAYS` | `7305` | Cap on issued CA validity |
+| `MIN_RSA_KEY_SIZE` | `2048` | Minimum accepted RSA key size |
+| `OCSP_KEY_CACHE_TTL_SECONDS` | `300` | In-memory TTL for the decrypted CA key used by OCSP (`0` disables) |
+| `MASTER_PASSPHRASE_FILE` / `SECRET_KEY_FILE` / `ADMIN_PASSWORD_FILE` | – | Read the secret from a file (Docker/systemd secret) instead of the env var |
 | `LDAP_ENABLED` | `false` | Enable LDAP authentication for the web login |
 | `LDAP_SERVER_URI` | – | LDAP server URI(s), e.g. `ldaps://dc01:636` (comma-separated for failover) |
 | `LDAP_USE_STARTTLS` | `false` | Upgrade `ldap://` connections with StartTLS |
