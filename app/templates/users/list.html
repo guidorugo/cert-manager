@@ -19,7 +19,7 @@
     <tbody>
     {% for user in users %}
         <tr>
-            <td>{{ user.username }}</td>
+            <td>{{ user.username }}{% if user.is_ldap_user %} <span class="badge bg-secondary">LDAP</span>{% endif %}</td>
             <td>
                 {% if user.role == 'admin' %}
                 <span class="badge bg-primary">Admin</span>
