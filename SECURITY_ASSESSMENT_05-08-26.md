@@ -69,7 +69,7 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | A3 | Medium | ✅ **Resolved** | Live Forgejo password was in `.git/config` — **rotated & de-embedded 2026-08-05** | Secrets |
 | A4 | Medium | Carried | Insecure defaults (`admin/admin`) in `.env.example`/compose | Secrets |
 | A5 | Medium | Carried | Subscriber private-key escrow (server generates+stores+serves keys) | Key Mgmt |
-| A6 | Low | Carried | `venv/` in git history | Supply chain |
+| A6 | Low | ✅ **Resolved** | `venv/` was in git history — **purged 2026-08-05** (history + tags rewritten, force-pushed) | Supply chain |
 | B1 | **High** | Carried | CSR proof-of-possession never verified (`is_signature_valid` absent) | PKI |
 | B2 | **High** | Carried | Revocation does not propagate to published CRL (stale cache) | PKI |
 | B3 | **High** | Carried | Revoked intermediate CAs never listed in parent CRL/OCSP | PKI |
@@ -105,9 +105,9 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | J1 | Medium | Carried | CI actions pinned by mutable tags, not commit SHAs | CI/CD |
 | J2 | Medium | Carried | No image signing / provenance / SBOM | CI/CD |
 
-Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings (5 new, 3 revised, 32 carried).
+Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings (5 new, 3 revised, 31 carried).
 
-**Remediated since publication (2026-08-05):** **A3** (Forgejo credential rotated and de-embedded) and the secret-in-GET portion of **A7** (CA `key`/`pkcs12` export made POST-only, password read from the form only; shipped in **v1.0.1**). A7's remaining items (unencrypted key PEM, mandatory HTTPS, dual control) remain open. All other prior findings stand.
+**Remediated since publication (2026-08-05):** **A3** (Forgejo credential rotated and de-embedded), **A6** (`venv/` purged from history + tags), and the secret-in-GET portion of **A7** (CA `key`/`pkcs12` export made POST-only, password read from the form only; shipped in **v1.0.1**). A7's remaining items (unencrypted key PEM, mandatory HTTPS, dual control) remain open. All other prior findings stand.
 
 ---
 
@@ -130,9 +130,8 @@ Every CA (and escrowed subscriber) private key is Fernet-encrypted with a key de
 ### [MEDIUM] A2 — Application database is world-readable on the host — *Revised (was High)*
 `data/cert-manager.db` is mode `0644` (root); a stale `instance/cert-manager.db` (Feb, not gitignored) is also `0644`. These hold the Fernet-encrypted CA keys, password hashes, and audit log. Any local user or co-located container reading the path can copy them (feeds A1). **Revised to Medium** because it is purely a local filesystem-permissions issue on what appears to be a single-operator host with non-default secrets; **it rises to High on any shared/multi-tenant host.** **Fix:** `chmod 600` DB + `.env`; own by a non-root service UID; `chmod 700 data/`; delete the stale `instance/` DB and gitignore `instance/`; encrypt backups.
 
-### [MEDIUM] A3 — Forgejo credentials in `.git/config` — ✅ *Resolved 2026-08-05*
-The `forgejo` remote embedded `http://home:<REDACTED>@10.0.0.82:3100/...` — a real, reusable Forgejo password in cleartext, transmitted over HTTP on every push/fetch. Verified the credential was **not in git history and never pushed** (local-disk exposure only).
-**Remediated 2026-08-05:** the Forgejo `home` account password was **rotated** (old value confirmed dead — API returns 401; new value verified working via `git ls-remote` and API 200). The embedded credential was **removed from the remote URL** (now the bare `http://10.0.0.82:3100/home/cert-manager.git`) and moved to git's `credential.helper store` backed by `~/.git-credentials` at mode `600`. The same de-embedding was applied to the other local repositories that reused the credential (`CatDetection`, `CatDetection-backup`, `Felisight`); a repository-wide sweep confirms no embedded Forgejo credential remains. *Operational follow-up: confirm the new password is recorded in a password manager, and check any n8n/automation that authenticated to Forgejo with the `home` password (webhooks use a URL/secret and are unaffected).*
+### [MEDIUM] A3 — Forgejo credential in `.git/config` — ✅ *Resolved 2026-08-05*
+`.git/config` is per-clone local metadata (regenerated on every clone), so the embedded Forgejo password was a **local-disk exposure only — never distributed in a clone** and never in git history. **Resolved:** the `home` password was rotated (old value confirmed dead), the credential de-embedded from the remote URL and moved to a mode-`600` `credential.helper store`; the same de-embedding was applied to the other local repos that reused it (`CatDetection`, `CatDetection-backup`, `Felisight`), and a sweep confirms none remain. *Operational follow-up: record the new password in a password manager, and check any n8n/automation that used the `home` password (webhooks use a URL/secret and are unaffected).*
 
 ### [MEDIUM] A4 — Insecure default secrets in code and `.env.example` — *Carried*
 `.env.example` ships `ADMIN_USERNAME=admin`/`ADMIN_PASSWORD=admin`; `docker-compose.yml:15` uses `${ADMIN_PASSWORD:-admin}` (unlike `SECRET_KEY`/`MASTER_PASSPHRASE`, which fail-closed with `:?`). The `_check_security` guard rejects the three exact insecure defaults (good) but only exact-string-matches (a weak-but-different passphrase passes) and is bypassed in debug (F2). A predictable `SECRET_KEY` enables session forgery. **Fix:** remove real-looking defaults; require secrets with no fallback; enforce a minimum-entropy check rather than exact denylist; use `${ADMIN_PASSWORD:?...}`. *(Positive: the new LDAP config defaults are safe — `LDAP_TLS_VERIFY` defaults true, and empty-env hardening prevents silent disablement.)*
@@ -140,8 +139,8 @@ The `forgejo` remote embedded `http://home:<REDACTED>@10.0.0.82:3100/...` — a 
 ### [MEDIUM] A5 — Subscriber private-key escrow — *Carried*
 Server-side certificate generation stores the subscriber key (`Certificate.private_key_enc`) and serves it via `/certificates/<id>/download-key` (admin) or PKCS#12. Concentrates risk and breaks non-repudiation. CSR-generated keys are correctly shown once and not stored. **Fix:** prefer CSR-based issuance; if server-side generation is offered, deliver once and do not persist (mirror the CSR flow), or make escrow opt-in with a destruction policy.
 
-### [LOW] A6 — `venv/` in git history — *Carried*
-The initial commit added `venv/`; now gitignored. No secret was committed (verified). Optional history rewrite; not urgent.
+### [LOW] A6 — `venv/` in git history — ✅ *Resolved 2026-08-05*
+The initial commit added `venv/` (~70 MB / 3,839 blobs); it was gitignored in the working tree but remained in history, so — unlike A3 — it **was** distributed to anyone cloning the repo. No secret was in it (`.env` was never committed), so the impact was clone bloat and a pinned old-dependency snapshot rather than an exploitable vuln. **Resolved:** history was rewritten (`filter-branch`, all commits + the `v1.0.0`/`v1.0.1` tags) to drop `venv/` and force-pushed to GitHub and Forgejo; all non-`venv` blobs verified byte-identical and the commit graph preserved (77 commits). A fresh clone now carries **0 `venv` objects** and a `.git` of ~0.5 MB (was ~52 MB); the GitHub releases survived the tag rewrite.
 
 ---
 
