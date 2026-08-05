@@ -64,9 +64,9 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | # | Severity | Status | Finding | Layer |
 |---|---|---|---|---|
 | A1 | **Critical** | Carried | All CA private keys protected by one env-var passphrase; no HSM; single point of compromise | Key Mgmt |
-| A7 | **High** | **NEW** | CA private-key **export over HTTP** — unencrypted key PEM; PKCS#12 password via GET; empty default password; GET-reachable | Key Mgmt |
+| A7 | **High** | NEW · partly fixed | CA private-key **export over HTTP** — secret-in-GET **fixed in v1.0.1**; unencrypted key PEM, HTTPS enforcement & dual-control residuals open | Key Mgmt |
 | A2 | Medium* | Revised | App DB (encrypted keys, hashes, audit) world-readable on host (*High on a shared host); stale `instance/` DB too | Storage |
-| A3 | Medium | Revised | Live Forgejo password in `.git/config` (local-disk only — not in git history; still rotate) | Secrets |
+| A3 | Medium | ✅ **Resolved** | Live Forgejo password was in `.git/config` — **rotated & de-embedded 2026-08-05** | Secrets |
 | A4 | Medium | Carried | Insecure defaults (`admin/admin`) in `.env.example`/compose | Secrets |
 | A5 | Medium | Carried | Subscriber private-key escrow (server generates+stores+serves keys) | Key Mgmt |
 | A6 | Low | Carried | `venv/` in git history | Supply chain |
@@ -105,7 +105,9 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | J1 | Medium | Carried | CI actions pinned by mutable tags, not commit SHAs | CI/CD |
 | J2 | Medium | Carried | No image signing / provenance / SBOM | CI/CD |
 
-Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings (5 new, 3 revised, 33 carried, 0 resolved of the prior set — note several *were mitigated in part*, see the per-finding notes).
+Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings (5 new, 3 revised, 32 carried).
+
+**Remediated since publication (2026-08-05):** **A3** (Forgejo credential rotated and de-embedded) and the secret-in-GET portion of **A7** (CA `key`/`pkcs12` export made POST-only, password read from the form only; shipped in **v1.0.1**). A7's remaining items (unencrypted key PEM, mandatory HTTPS, dual control) remain open. All other prior findings stand.
 
 ---
 
@@ -128,8 +130,9 @@ Every CA (and escrowed subscriber) private key is Fernet-encrypted with a key de
 ### [MEDIUM] A2 — Application database is world-readable on the host — *Revised (was High)*
 `data/cert-manager.db` is mode `0644` (root); a stale `instance/cert-manager.db` (Feb, not gitignored) is also `0644`. These hold the Fernet-encrypted CA keys, password hashes, and audit log. Any local user or co-located container reading the path can copy them (feeds A1). **Revised to Medium** because it is purely a local filesystem-permissions issue on what appears to be a single-operator host with non-default secrets; **it rises to High on any shared/multi-tenant host.** **Fix:** `chmod 600` DB + `.env`; own by a non-root service UID; `chmod 700 data/`; delete the stale `instance/` DB and gitignore `instance/`; encrypt backups.
 
-### [MEDIUM] A3 — Forgejo credentials in `.git/config` — *Revised (was High)*
-The `forgejo` remote embeds `http://home:<REDACTED>@10.0.0.82:3100/...` — a real, reusable Forgejo password in cleartext, transmitted over HTTP on every push/fetch. **Revised to Medium:** verified the credential is **not in git history and was never pushed** (local-disk exposure only), and the file is `0664` on a single-op host. Still a **live secret** — **rotate it** and switch to a credential helper / SSH over HTTPS (`git remote set-url forgejo http://10.0.0.82:3100/home/cert-manager.git`).
+### [MEDIUM] A3 — Forgejo credentials in `.git/config` — ✅ *Resolved 2026-08-05*
+The `forgejo` remote embedded `http://home:<REDACTED>@10.0.0.82:3100/...` — a real, reusable Forgejo password in cleartext, transmitted over HTTP on every push/fetch. Verified the credential was **not in git history and never pushed** (local-disk exposure only).
+**Remediated 2026-08-05:** the Forgejo account password was **rotated** (old value confirmed dead — API returns 401; new value verified working via `git ls-remote` and API 200). The embedded credential was **removed from the remote URL** (now the bare `http://10.0.0.82:3100/home/cert-manager.git`) and moved to git's `credential.helper store` backed by `~/.git-credentials` at mode `600`. The same de-embedding was applied to the other local repositories that reused the credential (`CatDetection`, `CatDetection-backup`, `Felisight`); a repository-wide sweep confirms no embedded Forgejo credential remains. *Operational follow-up: confirm the new password is recorded in a password manager, and check any n8n/automation that authenticated to Forgejo with the account password (webhooks use a URL/secret and are unaffected).*
 
 ### [MEDIUM] A4 — Insecure default secrets in code and `.env.example` — *Carried*
 `.env.example` ships `ADMIN_USERNAME=admin`/`ADMIN_PASSWORD=admin`; `docker-compose.yml:15` uses `${ADMIN_PASSWORD:-admin}` (unlike `SECRET_KEY`/`MASTER_PASSPHRASE`, which fail-closed with `:?`). The `_check_security` guard rejects the three exact insecure defaults (good) but only exact-string-matches (a weak-but-different passphrase passes) and is bypassed in debug (F2). A predictable `SECRET_KEY` enables session forgery. **Fix:** remove real-looking defaults; require secrets with no fallback; enforce a minimum-entropy check rather than exact denylist; use `${ADMIN_PASSWORD:?...}`. *(Positive: the new LDAP config defaults are safe — `LDAP_TLS_VERIFY` defaults true, and empty-env hardening prevents silent disablement.)*
@@ -323,7 +326,7 @@ Since the 2026-07-10 review the project has **added capability faster than it ha
 
 **Immediate (0–2 weeks) — critical/blocking**
 - **A7:** require POST for CA key/PKCS#12 export and read the password only from the form (one-line fix for the `request.values` leak); require a strong non-empty PKCS#12 password; stop emitting unencrypted key PEM (encrypt, or gate behind step-up re-auth + dual control); mandate HTTPS for these routes.
-- **A3:** rotate the Forgejo password and remove it from `.git/config` (credential helper / SSH).
+- ~~**A3:** rotate the Forgejo password and remove it from `.git/config` (credential helper / SSH).~~ ✅ **Done 2026-08-05.**
 - **A2:** `chmod 600` the DB and `.env`, own by a non-root UID, delete the stale `instance/` DB.
 - **C1/C2:** parse+lookup before decrypting in OCSP, cache the decrypted key, set `MAX_CONTENT_LENGTH`, enable rate limiting on `/public/*` (shared backend), pre-generate CRLs.
 - **B1/B5:** enforce CSR proof-of-possession (`is_signature_valid`) and a key-size floor at signing/creation.
@@ -352,4 +355,4 @@ Since the 2026-07-10 review the project has **added capability faster than it ha
 
 ---
 
-*Live-secret items to rotate regardless of code changes: the Forgejo password in `.git/config` and the values in `.env`. One issue in this report (A7's PKCS#12-password-via-`request.values`) was introduced by the same 2026-08-05 session and is a one-line fix.*
+*Live-secret status: the Forgejo password was **rotated and de-embedded on 2026-08-05** (A3 resolved). The values in `.env` should still be rotated if they have ever been exposed. A7's PKCS#12-password-via-`request.values` issue was fixed in **v1.0.1**.*
