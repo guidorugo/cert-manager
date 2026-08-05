@@ -178,7 +178,7 @@ All authenticated endpoints support HTTP Basic Auth or session cookies (see [Aut
 | POST | `/ca/detect-parent` | Detect parent CA for an imported certificate (JSON response) |
 | GET | `/ca/<ca_id>` | View CA details |
 | POST | `/ca/<ca_id>/crl` | Generate a new CRL |
-| GET, POST | `/ca/<ca_id>/download` | Export CA (`?format=pem\|chain\|key\|pkcs12`; `password` required for pkcs12) |
+| GET, POST | `/ca/<ca_id>/download` | Export CA. `pem`/`chain` via GET; `key`/`pkcs12` are **POST-only** (private-key material). `pkcs12` needs a `password` **form** field |
 
 #### Certificate Management (admin only)
 
