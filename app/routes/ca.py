@@ -211,9 +211,11 @@ def detail(ca_id):
 def download(ca_id):
     """Export the CA: format=pem (default) | chain | key | pkcs12.
 
-    pkcs12 requires a `password` parameter and bundles the certificate,
-    private key, and parent chain. key/pkcs12 are unavailable for
-    certificate-only CAs.
+    pem/chain are non-secret and may be fetched with GET. key and pkcs12
+    export private-key material and are therefore POST-only, so the key PEM
+    and the pkcs12 export password never appear in a GET URL (browser
+    history, Referer, proxy/access logs). pkcs12 requires a `password` form
+    field. key/pkcs12 are unavailable for certificate-only CAs.
     """
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
@@ -222,6 +224,12 @@ def download(ca_id):
 
     fmt = request.values.get("format", "pem")
     passphrase = current_app.config["MASTER_PASSPHRASE"]
+
+    # Private-key exports must not be triggerable by a GET URL that would
+    # land in logs/history; require POST for them.
+    if fmt in ("key", "pkcs12") and request.method != "POST":
+        flash("Private-key export must be submitted via POST.", "danger")
+        return redirect(url_for("ca.detail", ca_id=ca.id))
 
     if fmt == "chain":
         return Response(
@@ -245,7 +253,9 @@ def download(ca_id):
         )
 
     if fmt == "pkcs12":
-        password = request.values.get("password", "")
+        # Read from the form only — never request.values (which would accept
+        # the password from the query string and leak it into logs).
+        password = request.form.get("password", "")
         try:
             data = ca_service.export_ca_pkcs12(ca, passphrase, password)
         except ValueError as e:
