@@ -374,3 +374,30 @@ class TestLdapConfigValidation:
     def test_valid_template_config_boots(self):
         app = create_app(self._base_config())
         assert app is not None
+
+
+class TestLdapConfigEnvHardening:
+    def test_empty_env_strings_fall_back_to_defaults(self, monkeypatch):
+        """docker-compose passes unset variables as empty strings; empty
+        must behave exactly like unset for vars with non-empty defaults
+        (an empty LDAP_TLS_VERIFY silently disabling TLS verification
+        would be a security bug; int("") would crash at import)."""
+        import importlib
+
+        import app.config as config_module
+
+        monkeypatch.setenv("LDAP_USER_FILTER", "")
+        monkeypatch.setenv("LDAP_GROUP_MEMBER_ATTR", "")
+        monkeypatch.setenv("LDAP_TIMEOUT_SECONDS", "")
+        monkeypatch.setenv("LDAP_TLS_VERIFY", "")
+        monkeypatch.setenv("BASIC_AUTH_CACHE_TTL_SECONDS", "")
+        try:
+            reloaded = importlib.reload(config_module)
+            assert reloaded.Config.LDAP_USER_FILTER == "(uid={username})"
+            assert reloaded.Config.LDAP_GROUP_MEMBER_ATTR == "memberOf"
+            assert reloaded.Config.LDAP_TIMEOUT_SECONDS == 5
+            assert reloaded.Config.LDAP_TLS_VERIFY is True
+            assert reloaded.Config.BASIC_AUTH_CACHE_TTL_SECONDS == 60
+        finally:
+            monkeypatch.undo()
+            importlib.reload(config_module)
