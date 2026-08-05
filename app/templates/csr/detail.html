@@ -61,7 +61,7 @@
         <div class="card mb-3">
             <div class="card-header">CSR PEM</div>
             <div class="card-body">
-                <pre class="bg-light p-2" style="max-height:200px;overflow:auto;font-size:0.75rem">{{ csr.csr_pem }}</pre>
+                <pre class="bg-body-tertiary p-2" style="max-height:200px;overflow:auto;font-size:0.75rem">{{ csr.csr_pem }}</pre>
             </div>
         </div>
 
@@ -69,8 +69,8 @@
         <div class="card mb-3 border-warning">
             <div class="card-header bg-warning text-dark">Private Key (save now!)</div>
             <div class="card-body">
-                <pre class="bg-light p-2" style="max-height:200px;overflow:auto;font-size:0.75rem">{{ key_pem }}</pre>
-                <button class="btn btn-sm btn-outline-dark" onclick="copyKey()">Copy to Clipboard</button>
+                <pre class="bg-body-tertiary p-2" style="max-height:200px;overflow:auto;font-size:0.75rem">{{ key_pem }}</pre>
+                <button class="btn btn-sm btn-outline-secondary" onclick="copyKey()">Copy to Clipboard</button>
             </div>
         </div>
         {% endif %}
