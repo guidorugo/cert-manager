@@ -1,7 +1,7 @@
 import os
 import sys
 
-from flask import Flask, g, jsonify, request, session
+from flask import Flask, current_app, g, jsonify, request, session
 
 from .config import Config
 from .extensions import db, login_manager, csrf
@@ -50,10 +50,17 @@ def create_app(config_class=Config):
 def _setup_basic_auth(app):
     """Configure HTTP Basic Auth via before_request + unauthorized_handler."""
 
+    from .services.auth_service import CredentialCache
+    app.basic_auth_cache = CredentialCache(app.config.get("BASIC_AUTH_CACHE_TTL_SECONDS", 60))
+
     @app.before_request
     def check_basic_auth():
         g.basic_auth_used = False
         g.basic_auth_user = None
+        # g can outlive a single request when an app context is held open
+        # around requests (tests do this); never let a previous request's
+        # cached Flask-Login user leak into this one.
+        g.pop("_login_user", None)
 
         if not app.config.get("BASIC_AUTH_ENABLED", True):
             return
@@ -62,40 +69,62 @@ def _setup_basic_auth(app):
         if auth is None or auth.type != "basic":
             return
 
-        from .models.user import User
-        user = User.authenticate_basic_auth(auth.username, auth.password)
+        from .services import auth_service
+        from .services.audit_service import log_action, sanitize_username_for_log
 
-        if user is None:
-            from .services.audit_service import log_action, sanitize_username_for_log
+        result = auth_service.authenticate_basic(auth.username, auth.password)
+
+        if not result.ok:
             log_action(
                 "basic_auth_failed",
                 target_type="user",
-                details={"username": sanitize_username_for_log(auth.username), "auth_method": "basic_auth"},
+                details={
+                    "username": sanitize_username_for_log(auth.username),
+                    "auth_method": "basic_auth",
+                    "reason": result.reason,
+                },
             )
             db.session.commit()
+            if result.reason == auth_service.REASON_LDAP_UNREACHABLE:
+                response = jsonify({"error": "Directory service unavailable."})
+                response.status_code = 503
+                return response
             return
 
         g.basic_auth_used = True
-        g.basic_auth_user = user
+        g.basic_auth_user = result.user
+        # authenticate_basic() may have written audit entries (LDAP user
+        # provisioning / role sync), and audit logging reads current_user —
+        # which makes Flask-Login cache the anonymous user for the rest of
+        # the request. Drop that cache so the request loader re-runs and
+        # picks up g.basic_auth_user.
+        g.pop("_login_user", None)
 
-        from .services.audit_service import log_action
         log_action(
             "basic_auth_success",
             target_type="user",
-            target_id=user.id,
-            details={"username": user.username, "auth_method": "basic_auth"},
+            target_id=result.user.id,
+            details={
+                "username": result.user.username,
+                "auth_method": "basic_auth",
+                "auth_backend": result.auth_method,
+            },
         )
         db.session.commit()
 
     @login_manager.unauthorized_handler
     def handle_unauthorized():
-        if app.config.get("BASIC_AUTH_ENABLED", True) and request.authorization is not None:
-            realm = app.config.get("BASIC_AUTH_REALM", "cert-manager")
+        # login_manager is a module-level singleton, so every create_app()
+        # call re-registers this handler. Read config through current_app —
+        # not the closed-over app — so the handler always serves the app
+        # actually handling the request.
+        if current_app.config.get("BASIC_AUTH_ENABLED", True) and request.authorization is not None:
+            realm = current_app.config.get("BASIC_AUTH_REALM", "cert-manager")
             response = jsonify({"error": "Invalid credentials."})
             response.status_code = 401
             response.headers["WWW-Authenticate"] = f'Basic realm="{realm}"'
             return response
-        return app.login_manager.login_view and _redirect_to_login() or ("Unauthorized", 401)
+        return current_app.login_manager.login_view and _redirect_to_login() or ("Unauthorized", 401)
 
     def _redirect_to_login():
         from flask import flash, redirect, url_for
