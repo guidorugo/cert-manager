@@ -1,6 +1,7 @@
 import logging
+import re
 
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
+from flask import Blueprint, Response, render_template, redirect, url_for, flash, request, current_app, jsonify
 
 from ..decorators import admin_required
 from ..extensions import db
@@ -23,6 +24,12 @@ def _get_pem_input(req, textarea_field, file_field):
             raise ValueError(f"Uploaded file exceeds 64KB size limit.")
         return data.decode("utf-8").strip()
     return req.form.get(textarea_field, "").strip()
+
+
+def _safe_filename(name, extension):
+    """Sanitize user-provided name for Content-Disposition header."""
+    safe = re.sub(r'[^\w.\-]', '_', name)
+    return f'attachment; filename="{safe}.{extension}"'
 
 
 def _create_page_context():
@@ -197,6 +204,66 @@ def detail(ca_id):
         return redirect(url_for("ca.list_cas"))
     chain = ca_service.get_ca_chain(ca)
     return render_template("ca/detail.html", ca=ca, chain=chain)
+
+
+@ca_bp.route("/<int:ca_id>/download", methods=["GET", "POST"])
+@admin_required
+def download(ca_id):
+    """Export the CA: format=pem (default) | chain | key | pkcs12.
+
+    pkcs12 requires a `password` parameter and bundles the certificate,
+    private key, and parent chain. key/pkcs12 are unavailable for
+    certificate-only CAs.
+    """
+    ca = db.session.get(CertificateAuthority, ca_id)
+    if not ca:
+        flash("CA not found.", "danger")
+        return redirect(url_for("ca.list_cas"))
+
+    fmt = request.values.get("format", "pem")
+    passphrase = current_app.config["MASTER_PASSPHRASE"]
+
+    if fmt == "chain":
+        return Response(
+            ca_service.get_ca_chain(ca),
+            mimetype="application/x-pem-file",
+            headers={"Content-Disposition": _safe_filename(f"{ca.name}-chain", "pem")},
+        )
+
+    if fmt == "key":
+        try:
+            key_pem = ca_service.export_ca_key_pem(ca, passphrase)
+        except ValueError as e:
+            flash(str(e), "danger")
+            return redirect(url_for("ca.detail", ca_id=ca.id))
+        audit_service.log_action("download_ca_private_key", target_type="ca", target_id=ca.id)
+        db.session.commit()
+        return Response(
+            key_pem,
+            mimetype="application/x-pem-file",
+            headers={"Content-Disposition": _safe_filename(ca.name, "key")},
+        )
+
+    if fmt == "pkcs12":
+        password = request.values.get("password", "")
+        try:
+            data = ca_service.export_ca_pkcs12(ca, passphrase, password)
+        except ValueError as e:
+            flash(str(e), "danger")
+            return redirect(url_for("ca.detail", ca_id=ca.id))
+        audit_service.log_action("export_ca_pkcs12", target_type="ca", target_id=ca.id)
+        db.session.commit()
+        return Response(
+            data,
+            mimetype="application/x-pkcs12",
+            headers={"Content-Disposition": _safe_filename(ca.name, "p12")},
+        )
+
+    return Response(
+        ca.certificate_pem,
+        mimetype="application/x-pem-file",
+        headers={"Content-Disposition": _safe_filename(ca.name, "pem")},
+    )
 
 
 @ca_bp.route("/<int:ca_id>/revoke", methods=["GET", "POST"])
