@@ -25,6 +25,19 @@ def _get_pem_input(req, textarea_field, file_field):
     return req.form.get(textarea_field, "").strip()
 
 
+def _create_page_context():
+    """Template context for the create/import page.
+
+    signing_cas: selectable parents when generating a new intermediate (must
+    hold a private key). link_cas: selectable parents when linking an
+    imported CA (certificate-only parents are fine there).
+    """
+    return {
+        "signing_cas": CertificateAuthority.signing_capable().all(),
+        "link_cas": CertificateAuthority.query.filter_by(is_revoked=False).all(),
+    }
+
+
 @ca_bp.route("/")
 @admin_required
 def list_cas():
@@ -42,40 +55,62 @@ def create():
             name = request.form.get("name", "").strip()
             if not name:
                 flash("CA Name is required.", "danger")
-                return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
-
-            try:
-                cert_pem = _get_pem_input(request, "cert_pem", "cert_file")
-                key_pem = _get_pem_input(request, "key_pem", "key_file")
-            except ValueError as e:
-                flash(str(e), "danger")
-                return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
-
-            if not cert_pem:
-                flash("Certificate PEM is required.", "danger")
-                return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
-            if not key_pem:
-                flash("Private Key PEM is required.", "danger")
-                return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                return render_template("ca/create.html", **_create_page_context())
 
             upload_parent_id = request.form.get("upload_parent_id")
             parent_id = upload_parent_id if upload_parent_id else None
             passphrase = current_app.config["MASTER_PASSPHRASE"]
+            import_format = request.form.get("import_format", "pem")
 
             try:
-                ca = ca_service.import_ca(name, cert_pem, key_pem, passphrase,
-                                          parent_id=parent_id)
-                audit_service.log_action("import_ca", target_type="ca", target_id=ca.id)
+                if import_format == "pkcs12":
+                    uploaded = request.files.get("p12_file")
+                    if not uploaded or not uploaded.filename:
+                        raise ValueError("A PKCS#12 (.p12/.pfx) file is required.")
+                    p12_bytes = uploaded.read()
+                    if len(p12_bytes) > MAX_FILE_SIZE:
+                        raise ValueError("Uploaded file exceeds 64KB size limit.")
+                    p12_password = request.form.get("p12_password", "")
+                    ca = ca_service.import_pkcs12(name, p12_bytes, p12_password or None,
+                                                  passphrase, parent_id=parent_id)
+                else:
+                    cert_pem = _get_pem_input(request, "cert_pem", "cert_file")
+                    key_pem = _get_pem_input(request, "key_pem", "key_file")
+                    cert_only = request.form.get("cert_only") == "on"
+                    key_passphrase = request.form.get("key_passphrase", "")
+
+                    if not cert_pem:
+                        raise ValueError("Certificate PEM is required.")
+                    if cert_only and key_pem:
+                        raise ValueError("A private key was provided together with "
+                                         "'certificate only' - remove one of the two.")
+                    if not cert_only and not key_pem:
+                        raise ValueError("Private Key PEM is required "
+                                         "(or tick 'Import certificate only').")
+
+                    ca = ca_service.import_ca(name, cert_pem, key_pem or None, passphrase,
+                                              parent_id=parent_id,
+                                              key_passphrase=key_passphrase or None)
+
+                imported_parents = getattr(ca, "_imported_parents", [])
+                audit_service.log_action(
+                    "import_ca", target_type="ca", target_id=ca.id,
+                    details={"format": import_format, "has_key": ca.has_private_key,
+                             "imported_parents": imported_parents},
+                )
                 db.session.commit()
-                flash(f"CA '{ca.name}' imported successfully.", "success")
+                msg = f"CA '{ca.name}' imported successfully."
+                if imported_parents:
+                    msg += (f" {len(imported_parents)} parent CA(s) imported from the "
+                            f"chain: {', '.join(imported_parents)}.")
+                if not ca.has_private_key:
+                    msg += (" Imported without a private key: this CA cannot issue "
+                            "certificates, sign CRLs, or answer OCSP.")
+                flash(msg, "success" if ca.has_private_key else "warning")
                 return redirect(url_for("ca.detail", ca_id=ca.id))
             except ValueError as e:
                 flash(str(e), "danger")
-            except Exception as e:
+            except Exception:
                 logger.exception("Error importing CA")
                 flash("An unexpected error occurred while importing the CA.", "danger")
 
@@ -99,13 +134,11 @@ def create():
                 path_length = int(path_length_str) if path_length_str else None
             except ValueError:
                 flash("Key size, validity days, and path length must be valid numbers.", "danger")
-                return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                return render_template("ca/create.html", **_create_page_context())
 
             if not name or not cn:
                 flash("Name and Common Name are required.", "danger")
-                return render_template("ca/create.html",
-                                       cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                return render_template("ca/create.html", **_create_page_context())
 
             subject_attrs = {
                 "CN": cn, "O": org, "OU": ou,
@@ -119,13 +152,11 @@ def create():
                         parent_ca_id = int(parent_id)
                     except ValueError:
                         flash("Invalid parent CA ID.", "danger")
-                        return render_template("ca/create.html",
-                                               cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                        return render_template("ca/create.html", **_create_page_context())
                     parent_ca = db.session.get(CertificateAuthority, parent_ca_id)
                     if not parent_ca:
                         flash("Parent CA not found.", "danger")
-                        return render_template("ca/create.html",
-                                               cas=CertificateAuthority.query.filter_by(is_revoked=False).all())
+                        return render_template("ca/create.html", **_create_page_context())
                     ca = ca_service.create_intermediate_ca(
                         name, parent_ca, subject_attrs, key_type, key_size,
                         validity_days, passphrase, path_length=path_length,
@@ -143,8 +174,7 @@ def create():
                 logger.exception("Error creating CA")
                 flash("An unexpected error occurred while creating the CA.", "danger")
 
-    cas = CertificateAuthority.query.all()
-    return render_template("ca/create.html", cas=cas)
+    return render_template("ca/create.html", **_create_page_context())
 
 
 @ca_bp.route("/detect-parent", methods=["POST"])

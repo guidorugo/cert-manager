@@ -75,6 +75,8 @@ def revoke_ca(ca_id, reason="unspecified"):
 
 
 def generate_crl(ca, passphrase, validity_days=7):
+    if not ca.private_key_enc:
+        raise ValueError("This CA was imported without its private key and cannot sign CRLs.")
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
     ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
 

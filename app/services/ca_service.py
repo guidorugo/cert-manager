@@ -10,6 +10,8 @@ from ..extensions import db
 from ..models.ca import CertificateAuthority
 from .crypto_utils import encrypt_private_key, decrypt_private_key
 
+MAX_PEM_SIZE = 64 * 1024  # 64KB
+
 
 def _generate_key(key_type: str, key_size: int):
     if key_type == "RSA":
@@ -111,6 +113,9 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
 
 def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
                            validity_days, passphrase, path_length=None):
+    if not parent_ca.private_key_enc:
+        raise ValueError("Parent CA was imported without its private key and cannot sign a new intermediate CA.")
+
     key = _generate_key(key_type, key_size)
     subject = _build_subject(subject_attrs)
     parent_cert = x509.load_pem_x509_certificate(parent_ca.certificate_pem.encode())
@@ -194,76 +199,77 @@ def get_ca_chain(ca):
     return "\n".join(chain)
 
 
+def _find_parent_by_issuer(cert):
+    """Find an existing CA whose subject matches cert's issuer. Returns id or None."""
+    for candidate in CertificateAuthority.query.all():
+        try:
+            candidate_cert = x509.load_pem_x509_certificate(candidate.certificate_pem.encode())
+            if candidate_cert.subject == cert.issuer:
+                return candidate.id
+        except Exception:
+            continue
+    return None
+
+
 def detect_parent_ca(cert_pem):
     """Detect if a certificate is self-signed and find its parent CA.
 
-    Returns (is_self_signed, parent_id). Returns (None, None) on parse error.
+    Accepts a single PEM certificate or a bundle (the first certificate is
+    examined). Returns (is_self_signed, parent_id); (None, None) on parse error.
     """
     try:
-        cert = x509.load_pem_x509_certificate(cert_pem.encode() if isinstance(cert_pem, str) else cert_pem)
+        data = cert_pem.encode() if isinstance(cert_pem, str) else cert_pem
+        cert = x509.load_pem_x509_certificates(data)[0]
     except Exception:
         return (None, None)
 
     if cert.issuer == cert.subject:
         return (True, None)
-
-    # Search existing CAs for issuer match
-    all_cas = CertificateAuthority.query.all()
-    for candidate in all_cas:
-        try:
-            candidate_cert = x509.load_pem_x509_certificate(candidate.certificate_pem.encode())
-            if candidate_cert.subject == cert.issuer:
-                return (False, candidate.id)
-        except Exception:
-            continue
-
-    return (False, None)
+    return (False, _find_parent_by_issuer(cert))
 
 
-def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None):
-    """Import an existing CA from PEM certificate and private key.
-
-    Validates the certificate is a CA, the key matches, and saves to database.
-    """
-    MAX_PEM_SIZE = 64 * 1024  # 64KB
-
-    # Size guard
-    if len(cert_pem.encode() if isinstance(cert_pem, str) else cert_pem) > MAX_PEM_SIZE:
-        raise ValueError("Certificate PEM exceeds 64KB size limit.")
-    if len(key_pem.encode() if isinstance(key_pem, str) else key_pem) > MAX_PEM_SIZE:
-        raise ValueError("Private key PEM exceeds 64KB size limit.")
-
-    # Parse certificate
+def _load_import_private_key(key_bytes, key_passphrase=None):
+    """Parse an (optionally encrypted) PEM private key with friendly errors."""
+    password = key_passphrase.encode() if key_passphrase else None
     try:
-        cert = x509.load_pem_x509_certificate(
-            cert_pem.encode() if isinstance(cert_pem, str) else cert_pem
-        )
-    except Exception:
-        raise ValueError("Failed to parse certificate PEM. Ensure it is a valid PEM-encoded certificate.")
-
-    # Parse private key
-    key_bytes = key_pem.encode() if isinstance(key_pem, str) else key_pem
-    try:
-        private_key = serialization.load_pem_private_key(key_bytes, password=None)
+        private_key = serialization.load_pem_private_key(key_bytes, password=password)
     except TypeError:
-        raise ValueError("The private key appears to be encrypted. Please provide an unencrypted private key.")
+        if password is None:
+            raise ValueError("The private key is encrypted. Provide its passphrase in the key passphrase field.")
+        raise ValueError("The private key is not encrypted. Leave the key passphrase empty.")
     except Exception:
+        if password is not None:
+            raise ValueError("Could not decrypt the private key. Check the key passphrase.")
         raise ValueError("Failed to parse private key PEM. Ensure it is a valid PEM-encoded private key.")
 
-    # Validate key type
     if not isinstance(private_key, (rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey)):
         raise ValueError("Unsupported key type. Only RSA and EC keys are supported.")
+    return private_key
 
-    # Key-cert match
-    cert_pub_bytes = cert.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    key_pub_bytes = private_key.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    if cert_pub_bytes != key_pub_bytes:
-        raise ValueError("The private key does not match the certificate's public key.")
 
+def _key_info_from_public(public_key):
+    if isinstance(public_key, rsa.RSAPublicKey):
+        return "RSA", public_key.key_size
+    if isinstance(public_key, ec.EllipticCurvePublicKey):
+        return "EC", public_key.curve.key_size
+    raise ValueError("Unsupported certificate key type. Only RSA and EC are supported.")
+
+
+def _unique_ca_name(base):
+    name = base
+    suffix = 2
+    while CertificateAuthority.query.filter_by(name=name).first():
+        name = f"{base} ({suffix})"
+        suffix += 1
+    return name
+
+
+def _import_ca_object(name, cert, private_key, passphrase, parent_id=None):
+    """Validate and stage a single CA row from parsed objects.
+
+    private_key may be None for certificate-only imports (empty-bytes
+    sentinel is stored). Flushes but does not commit.
+    """
     # BasicConstraints - must be a CA
     try:
         bc = cert.extensions.get_extension_for_class(x509.BasicConstraints)
@@ -272,6 +278,22 @@ def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None):
         path_length = bc.value.path_length
     except x509.ExtensionNotFound:
         raise ValueError("Certificate is missing the BasicConstraints extension. Only CA certificates can be imported.")
+
+    # Key-cert match (validate the material before database constraints)
+    if private_key is not None:
+        cert_pub_bytes = cert.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        key_pub_bytes = private_key.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        if cert_pub_bytes != key_pub_bytes:
+            raise ValueError("The private key does not match the certificate's public key.")
+        key_type, key_size = _key_info_from_public(private_key.public_key())
+        enc_key = encrypt_private_key(private_key, passphrase)
+    else:
+        key_type, key_size = _key_info_from_public(cert.public_key())
+        enc_key = b""  # sentinel: imported without a private key
 
     # Name uniqueness
     if CertificateAuthority.query.filter_by(name=name).first():
@@ -282,21 +304,9 @@ def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None):
     if CertificateAuthority.query.filter_by(serial_number=serial_hex).first():
         raise ValueError(f"A CA with serial number '{serial_hex}' already exists.")
 
-    # Extract metadata
     cn_attrs = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
     common_name = cn_attrs[0].value if cn_attrs else name
 
-    if isinstance(private_key, rsa.RSAPrivateKey):
-        key_type = "RSA"
-        key_size = private_key.key_size
-    else:
-        key_type = "EC"
-        key_size = private_key.key_size
-
-    not_before = cert.not_valid_before_utc
-    not_after = cert.not_valid_after_utc
-
-    # Detect root vs intermediate
     is_self_signed = cert.issuer == cert.subject
 
     # Resolve parent
@@ -307,27 +317,173 @@ def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None):
             raise ValueError("Specified parent CA not found.")
         resolved_parent_id = parent_ca.id
     elif not is_self_signed:
-        # Auto-detect parent
-        _, detected_parent_id = detect_parent_ca(cert_pem)
-        resolved_parent_id = detected_parent_id
-
-    # Encrypt and save
-    enc_key = encrypt_private_key(key_bytes, passphrase)
+        resolved_parent_id = _find_parent_by_issuer(cert)
 
     ca = CertificateAuthority(
         name=name,
         common_name=common_name,
         serial_number=serial_hex,
-        certificate_pem=cert_pem if isinstance(cert_pem, str) else cert_pem.decode(),
+        certificate_pem=cert.public_bytes(serialization.Encoding.PEM).decode(),
         private_key_enc=enc_key,
         parent_id=resolved_parent_id,
         is_root=is_self_signed and resolved_parent_id is None,
         key_type=key_type,
         key_size=key_size,
-        not_before=not_before,
-        not_after=not_after,
+        not_before=cert.not_valid_before_utc,
+        not_after=cert.not_valid_after_utc,
         path_length=path_length,
     )
     db.session.add(ca)
-    db.session.commit()
+    db.session.flush()
     return ca
+
+
+def _order_chain(certs):
+    """Order CA certificates leaf-first up the chain; verify each signature.
+
+    Accepts an unordered bundle. The top of the returned list is the highest
+    parent present in the bundle (not necessarily self-signed - the chain may
+    continue in an existing database CA).
+    """
+    unique = {}
+    for cert in certs:
+        unique[(cert.serial_number, cert.subject.public_bytes())] = cert
+    certs = list(unique.values())
+    if len(certs) == 1:
+        return certs
+
+    issuer_keys = {c.issuer.public_bytes() for c in certs if c.issuer != c.subject}
+    leaves = [c for c in certs if c.subject.public_bytes() not in issuer_keys]
+    if len(leaves) != 1:
+        raise ValueError("The certificate bundle does not form a single chain.")
+
+    by_subject = {c.subject.public_bytes(): c for c in certs}
+    ordered = [leaves[0]]
+    current = leaves[0]
+    while current.issuer != current.subject:
+        parent = by_subject.get(current.issuer.public_bytes())
+        if parent is None:
+            break  # top of the provided bundle; may still link to an existing CA
+        if parent in ordered:
+            raise ValueError("The certificate bundle contains a loop.")
+        try:
+            current.verify_directly_issued_by(parent)
+        except Exception as exc:
+            raise ValueError(f"Certificate chain does not verify: {exc}")
+        ordered.append(parent)
+        current = parent
+
+    if len(ordered) != len(certs):
+        raise ValueError("The certificate bundle contains certificates that are not part of one chain.")
+    return ordered
+
+
+def _import_chain(name, ordered, private_key, passphrase, parent_id=None):
+    """Import an ordered (leaf-first) chain.
+
+    Parents are imported certificate-only with auto-generated names
+    (deduplicated against existing CAs by serial number); the leaf gets the
+    requested name and the private key, when provided.
+    """
+    top = ordered[-1]
+    top_parent_id = None
+    if parent_id is not None and str(parent_id).strip():
+        if top.issuer == top.subject:
+            raise ValueError("The bundle ends in a self-signed root; a parent CA cannot be assigned to it.")
+        top_parent_id = parent_id
+
+    imported_parents = []
+    current_parent_id = top_parent_id
+
+    for cert in reversed(ordered[1:]):
+        serial_hex = format(cert.serial_number, "x")
+        existing = CertificateAuthority.query.filter_by(serial_number=serial_hex).first()
+        if existing:
+            current_parent_id = existing.id
+            continue
+        cn_attrs = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
+        base_name = cn_attrs[0].value if cn_attrs else f"{name} parent"
+        parent_ca = _import_ca_object(
+            _unique_ca_name(base_name), cert, None, passphrase, parent_id=current_parent_id
+        )
+        imported_parents.append(parent_ca.name)
+        current_parent_id = parent_ca.id
+
+    leaf = _import_ca_object(name, ordered[0], private_key, passphrase, parent_id=current_parent_id)
+    db.session.commit()
+    leaf._imported_parents = imported_parents
+    return leaf
+
+
+def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None, key_passphrase=None):
+    """Import an existing CA from PEM material.
+
+    cert_pem may contain a single CA certificate or a full chain bundle; with
+    a bundle, parents are imported certificate-only (deduplicated by serial
+    number) and linked. key_pem is optional - omit it to import
+    certificate-only (e.g. an offline root) - and may be encrypted, with
+    key_passphrase used to decrypt it.
+    """
+    cert_bytes = cert_pem.encode() if isinstance(cert_pem, str) else cert_pem
+    if len(cert_bytes) > MAX_PEM_SIZE:
+        raise ValueError("Certificate PEM exceeds 64KB size limit.")
+
+    private_key = None
+    if key_pem:
+        key_bytes = key_pem.encode() if isinstance(key_pem, str) else key_pem
+        if len(key_bytes) > MAX_PEM_SIZE:
+            raise ValueError("Private key PEM exceeds 64KB size limit.")
+        private_key = _load_import_private_key(key_bytes, key_passphrase)
+
+    try:
+        certs = x509.load_pem_x509_certificates(cert_bytes)
+    except Exception:
+        raise ValueError("Failed to parse certificate PEM. Ensure it is a valid PEM-encoded certificate.")
+
+    ordered = _order_chain(certs)
+    if len(ordered) == 1:
+        ca = _import_ca_object(name, ordered[0], private_key, passphrase, parent_id=parent_id)
+        db.session.commit()
+        ca._imported_parents = []
+        return ca
+    return _import_chain(name, ordered, private_key, passphrase, parent_id=parent_id)
+
+
+def import_pkcs12(name, p12_bytes, p12_password, passphrase, parent_id=None):
+    """Import a CA from a PKCS#12 (.p12/.pfx) bundle.
+
+    The bundle's main certificate becomes the named CA (with its key when
+    present); additional certificates are treated as its chain and imported
+    certificate-only.
+    """
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    if len(p12_bytes) > MAX_PEM_SIZE:
+        raise ValueError("PKCS#12 file exceeds 64KB size limit.")
+
+    password = p12_password.encode() if p12_password else None
+    try:
+        key, cert, additional = pkcs12.load_key_and_certificates(p12_bytes, password)
+    except Exception:
+        raise ValueError("Could not open the PKCS#12 file: wrong password or not a valid PKCS#12 bundle.")
+
+    if key is not None and not isinstance(key, (rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey)):
+        raise ValueError("Unsupported key type. Only RSA and EC keys are supported.")
+
+    if cert is None:
+        # Key-less bundles store their certificates in the additional list
+        certs = list(additional or [])
+        if not certs:
+            raise ValueError("The PKCS#12 bundle does not contain a certificate.")
+    else:
+        certs = [cert] + list(additional or [])
+
+    ordered = _order_chain(certs)
+    if cert is not None and ordered[0] != cert:
+        raise ValueError("The PKCS#12 main certificate is not the leaf of the bundled chain.")
+    if len(ordered) == 1:
+        ca = _import_ca_object(name, ordered[0], key, passphrase, parent_id=parent_id)
+        db.session.commit()
+        ca._imported_parents = []
+        return ca
+    return _import_chain(name, ordered, key, passphrase, parent_id=parent_id)
