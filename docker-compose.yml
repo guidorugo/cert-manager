@@ -14,4 +14,21 @@ services:
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - SERVER_NAME_FOR_OCSP=${SERVER_NAME_FOR_OCSP:-localhost:5000}
+      # LDAP authentication (optional feature - stays disabled unless
+      # configured in .env; unset variables fall back to app defaults)
+      - LDAP_ENABLED=${LDAP_ENABLED:-false}
+      - LDAP_SERVER_URI=${LDAP_SERVER_URI:-}
+      - LDAP_USE_STARTTLS=${LDAP_USE_STARTTLS:-false}
+      - LDAP_TLS_VERIFY=${LDAP_TLS_VERIFY:-true}
+      - LDAP_CA_CERT_FILE=${LDAP_CA_CERT_FILE:-}
+      - LDAP_USER_DN_TEMPLATE=${LDAP_USER_DN_TEMPLATE:-}
+      - LDAP_BIND_DN=${LDAP_BIND_DN:-}
+      - LDAP_BIND_PASSWORD=${LDAP_BIND_PASSWORD:-}
+      - LDAP_USER_SEARCH_BASE=${LDAP_USER_SEARCH_BASE:-}
+      - LDAP_USER_FILTER=${LDAP_USER_FILTER:-}
+      - LDAP_ADMIN_GROUP_DN=${LDAP_ADMIN_GROUP_DN:-}
+      - LDAP_REQUESTER_GROUP_DN=${LDAP_REQUESTER_GROUP_DN:-}
+      - LDAP_GROUP_MEMBER_ATTR=${LDAP_GROUP_MEMBER_ATTR:-}
+      - LDAP_TIMEOUT_SECONDS=${LDAP_TIMEOUT_SECONDS:-}
+      - BASIC_AUTH_CACHE_TTL_SECONDS=${BASIC_AUTH_CACHE_TTL_SECONDS:-}
     restart: unless-stopped
