@@ -265,7 +265,9 @@ def generate_crl(ca_id):
         audit_service.log_action("generate_crl", target_type="ca", target_id=ca.id)
         db.session.commit()
         flash(f"CRL #{ca.crl_number} generated successfully.", "success")
-    except Exception as e:
+    except ValueError as e:
+        flash(str(e), "danger")
+    except Exception:
         logger.exception("Error generating CRL")
         flash("An unexpected error occurred while generating the CRL.", "danger")
 
