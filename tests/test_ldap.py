@@ -270,12 +270,16 @@ class TestUnusablePassword:
         assert user.check_password("anything") is False
         assert user.check_password("!") is False
 
-    def test_basic_auth_rejected_for_ldap_user(self, db):
+    def test_basic_auth_rejected_for_ldap_user_when_ldap_disabled(self, client, db):
+        import base64
+
         user = User(username="ldapuser", role="csr_requester", auth_source="ldap")
         user.set_unusable_password()
         db.session.add(user)
         db.session.commit()
-        assert User.authenticate_basic_auth("ldapuser", "anything") is None
+        creds = base64.b64encode(b"ldapuser:anything").decode()
+        resp = client.get("/csr/", headers={"Authorization": f"Basic {creds}"})
+        assert resp.status_code == 401
 
 
 class TestLdapLoginRoute:

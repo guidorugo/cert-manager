@@ -25,6 +25,9 @@ class Config:
 
     BASIC_AUTH_ENABLED = os.environ.get("BASIC_AUTH_ENABLED", "true").lower() == "true"
     BASIC_AUTH_REALM = os.environ.get("BASIC_AUTH_REALM", "cert-manager")
+    # Verified Basic Auth credentials are cached in memory for this many
+    # seconds to avoid an LDAP bind / password-hash check per request (0 = off)
+    BASIC_AUTH_CACHE_TTL_SECONDS = int(os.environ.get("BASIC_AUTH_CACHE_TTL_SECONDS", "60"))
 
     # LDAP authentication (optional; Phase 1 covers the session login only)
     LDAP_ENABLED = os.environ.get("LDAP_ENABLED", "false").lower() == "true"
