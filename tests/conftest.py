@@ -77,3 +77,12 @@ def inactive_user(db):
     db.session.add(user)
     db.session.commit()
     return user
+
+
+@pytest.fixture(autouse=True)
+def _clear_basic_auth_cache(app):
+    """Credentials cached by one test must never satisfy another."""
+    cache = getattr(app, "basic_auth_cache", None)
+    if cache is not None:
+        cache.clear()
+    yield
