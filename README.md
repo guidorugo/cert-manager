@@ -280,6 +280,7 @@ When `LDAP_ENABLED=true`, the web login checks the local database first (so the 
 - Locally deactivating an LDAP user blocks them regardless of directory state.
 - LDAP accounts have no local password: password reset is disabled for them. HTTP Basic Auth works for LDAP accounts too; if the directory is unreachable, LDAP-backed Basic Auth requests receive `503`.
 - Empty passwords are rejected before any bind (prevents the LDAP anonymous-bind pitfall), and usernames are escaped against LDAP filter injection.
+- The provided `docker-compose.yml` passes all `LDAP_*` variables through from `.env` — enable LDAP by uncommenting them there, no compose edits needed. When they are unset, LDAP stays disabled.
 
 ## Architecture
 
