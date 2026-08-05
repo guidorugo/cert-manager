@@ -338,6 +338,45 @@ class TestImportRoutes:
         ca = CertificateAuthority.query.filter_by(name="Form P12 Root").one()
         assert ca.has_private_key is True
 
+    def test_public_crl_404_for_keyless_ca(self, client, db):
+        _, cert = _self_signed_ca("Keyless Public Root")
+        ca = ca_service.import_ca("Keyless Public Root", _pem(cert), None, PASS)
+        assert client.get(f"/public/crl/{ca.id}.crl").status_code == 404
+        assert client.get(f"/public/crl/{ca.id}.pem").status_code == 404
+
+    def test_generate_crl_route_flashes_specific_error(self, auth_admin, db):
+        _, cert = _self_signed_ca("Keyless Flash Root")
+        ca = ca_service.import_ca("Keyless Flash Root", _pem(cert), None, PASS)
+        resp = auth_admin.post(f"/ca/{ca.id}/crl", follow_redirects=True)
+        assert b"cannot sign CRLs" in resp.data
+
+    def test_ocsp_response_mirrors_request_hash(self, db):
+        """openssl requests with SHA-1 by default; the CertID hash in the
+        response must match the request's or clients report no status."""
+        root = ca_service.create_root_ca(
+            "OCSP Hash Root", {"CN": "OCSP Hash Root"}, "RSA", 2048, 3650, PASS,
+        )
+        leaf = cert_service.create_certificate(
+            ca=root, subject_attrs={"CN": "h.test"}, san_list=[],
+            validity_days=365, passphrase=PASS,
+        )
+        root_cert = x509.load_pem_x509_certificate(root.certificate_pem.encode())
+        leaf_cert = x509.load_pem_x509_certificate(leaf.certificate_pem.encode())
+
+        for algo_cls in (hashes.SHA1, hashes.SHA256):
+            req = (
+                ocsp.OCSPRequestBuilder()
+                .add_certificate(leaf_cert, root_cert, algo_cls())
+                .build()
+            )
+            der = ocsp_service.build_ocsp_response(
+                req.public_bytes(serialization.Encoding.DER), root, PASS,
+            )
+            resp = ocsp.load_der_ocsp_response(der)
+            assert resp.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL
+            assert isinstance(resp.hash_algorithm, algo_cls)
+            assert resp.certificate_status == ocsp.OCSPCertStatus.GOOD
+
     def test_upload_chain_via_form_flashes_parents(self, auth_admin, db):
         root_key, root_cert = _self_signed_ca("Form Chain Root")
         int_key, int_cert = _child_ca("Form Chain Inter", root_key, root_cert)

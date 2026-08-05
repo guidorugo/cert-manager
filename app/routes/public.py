@@ -20,6 +20,9 @@ def download_crl_der(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
         return "CA not found", 404
+    if not ca.has_private_key:
+        # Certificate-only import: this CA cannot sign CRLs
+        return "CRL not available for this CA", 404
 
     passphrase = current_app.config["MASTER_PASSPHRASE"]
     try:
@@ -39,6 +42,9 @@ def download_crl_pem(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
         return "CA not found", 404
+    if not ca.has_private_key:
+        # Certificate-only import: this CA cannot sign CRLs
+        return "CRL not available for this CA", 404
 
     passphrase = current_app.config["MASTER_PASSPHRASE"]
     try:
