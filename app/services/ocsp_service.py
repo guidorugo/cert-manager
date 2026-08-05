@@ -23,6 +23,14 @@ _REVOCATION_REASONS = {
 
 
 def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
+    if not ca.private_key_enc:
+        # Certificate-only CA: cannot sign responses. UNAUTHORIZED responses
+        # are unsigned, so they can be built without a key.
+        response = ocsp.OCSPResponseBuilder().build_unsuccessful(
+            ocsp.OCSPResponseStatus.UNAUTHORIZED
+        )
+        return response.public_bytes(serialization.Encoding.DER)
+
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
     ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
 
