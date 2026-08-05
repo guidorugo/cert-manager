@@ -16,6 +16,7 @@ A web-based X.509 Certificate Authority management application built with Python
 - **Audit Logging**: Every sensitive action logged with user, timestamp, IP, and details
 - **User Management**: Admin UI for creating users, assigning roles, and managing accounts
 - **HTTP Basic Auth**: Stateless API access via `curl -u user:pass` for scripts and automation, alongside session-based browser auth
+- **Dark Theme**: Light/dark mode toggle with OS-preference default and per-browser persistence
 - **Security**: Private keys encrypted at rest with Fernet (PBKDF2-derived key, 600k iterations), session hardening, insecure-default rejection
 
 ## Quick Start
