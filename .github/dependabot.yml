@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # GitHub Actions — keep the SHA pins fresh (J1).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  # Docker base image — keep the digest pin fresh (H2).
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: docker
+
+  # Python dependencies — bumps requirements.in and regenerates the hash-locked
+  # requirements.txt (I1). Grouped to reduce PR noise.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    groups:
+      python-deps:
+        patterns: ["*"]

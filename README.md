@@ -38,7 +38,7 @@ Navigate to `http://localhost:5000` and log in with the default credentials (adm
 
 ### Pre-built Image (GHCR)
 
-A pre-built image is published to GitHub Container Registry on every push to `master`.
+A pre-built image is published to GitHub Container Registry on each `v*` release tag — **cosign-signed** (keyless, via GitHub OIDC) with **SLSA provenance** and an **SBOM**.
 
 ```bash
 # Pull the latest image
@@ -54,6 +54,18 @@ docker run -d \
 ```
 
 You can also use the pre-built image with docker compose by commenting out the `build` line and uncommenting the `image` line in `docker-compose.yml`.
+
+**Verify a release image** (signature + provenance/SBOM):
+
+```bash
+# Verify the keyless cosign signature (signed by the release workflow)
+cosign verify ghcr.io/guidorugo/cert-manager:2.0.1 \
+  --certificate-identity-regexp 'https://github.com/guidorugo/cert-manager/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Inspect the SLSA provenance / SBOM attestations
+cosign download attestation ghcr.io/guidorugo/cert-manager:2.0.1 | jq .
+```
 
 ### Local Development
 
