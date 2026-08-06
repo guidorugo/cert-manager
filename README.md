@@ -139,6 +139,14 @@ Then set on the app service: `SOFTHSM2_CONF=/app/data/softhsm/softhsm2.conf`,
   docker compose exec app flask keys migrate-to-hsm --ca-id 3   # just one
   ```
 
+## Subscriber keys & escrow
+
+> **How private keys are handled.** *Create Certificate* generates the subscriber keypair **server-side** and **escrows** it — stored **encrypted at rest** (Fernet + PBKDF2-HMAC-SHA256, 600k iterations, per-record salt; never plaintext, not cached in memory) and re-downloadable. Convenient for server/TLS certificates you operate yourself.
+>
+> For **client-auth, S/MIME email, and code-signing** certificates — where the subscriber should be the *only* holder of the key — use **Sign CSR** instead: generate the key on the subscriber's side (ideally in their own token/HSM) and submit a CSR; the app signs it **without ever seeing the private key**.
+>
+> The **SoftHSM** backend protects the **CA signing key**, not subscriber/leaf keys, so it does not remove escrow — CSR-based issuance is the escrow-free path.
+
 ## API Reference
 
 Cert Manager is a web application with form-based (HTML) endpoints. All authenticated routes use session cookies set at login. Public endpoints require no authentication.
