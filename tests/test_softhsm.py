@@ -18,11 +18,12 @@ import pytest
 pytest.importorskip("pkcs11")  # skip whole module if the library is absent
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
+from cryptography.x509 import ocsp
 from cryptography.x509.oid import NameOID
 
-from app.services import ca_service
+from app.services import ca_service, cert_service, crl_service, ocsp_service
 from app.services.crypto_utils import decrypt_private_key
 from app.services.keybackend import get_backend, pkcs11_session
 from app.services.keybackend.softhsm import Pkcs11Backend
@@ -71,6 +72,8 @@ def _hsm_ca(ca, label):
         key_backend="softhsm",
         private_key_enc=b"",
         has_signing_key=True,
+        key_type=ca.key_type,
+        key_size=ca.key_size,
     )
 
 
@@ -146,22 +149,164 @@ def test_generate_ec_key_in_token(app, db, hsm_config):
         pub.verify(encode_ecdsa_signature(raw), data, ec.ECDSA(hashes.SHA256()))
 
 
-# --- Phase-2 boundaries -----------------------------------------------------
+def test_can_export_false(app, db, hsm_config):
+    with app.app_context():
+        assert Pkcs11Backend().can_export() is False
 
-def test_crl_and_ocsp_not_yet_supported(app, db, hsm_config):
+
+# --- Phase 3: CRL (byte-identical) ------------------------------------------
+
+def test_rsa_crl_der_is_byte_identical(app, db, hsm_config):
     with app.app_context():
         ca = ca_service.create_root_ca(
-            name="Boundary Root", subject_attrs={"CN": "Boundary Root"},
+            name="CRL Root RSA", subject_attrs={"CN": "CRL Root RSA"},
             key_type="RSA", key_size=2048, validity_days=3650, passphrase=PASSPHRASE,
         )
-        backend = Pkcs11Backend()
-        with pytest.raises(NotImplementedError):
-            backend.sign_crl(None, _hsm_ca(ca, "x"))
-        spec = OcspResponseSpec(
-            subject_cert_der=b"", issuer_cert_der=b"",
-            cert_status=None, this_update=None, next_update=None,
-            revocation_time=None, revocation_reason=None, algorithm=None,
+        ca_key = decrypt_private_key(ca.private_key_enc, PASSPHRASE)
+        Pkcs11Backend().import_ca_key(ca_key, label="crl-rsa")
+
+        ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        builder = (
+            x509.CertificateRevocationListBuilder()
+            .issuer_name(ca_cert.subject)
+            .last_update(now)
+            .next_update(now + timedelta(days=7))
+            .add_revoked_certificate(
+                x509.RevokedCertificateBuilder()
+                .serial_number(0x1234)
+                .revocation_date(now)
+                .build()
+            )
         )
-        with pytest.raises(NotImplementedError):
-            backend.sign_ocsp(spec, _hsm_ca(ca, "x"))
-        assert backend.can_export() is False
+        soft = get_backend("software").sign_crl(builder, ca, secret=PASSPHRASE)
+        hsm = Pkcs11Backend().sign_crl(builder, _hsm_ca(ca, "crl-rsa"))
+        assert soft == hsm  # RSA deterministic -> exact byte parity
+        crl = x509.load_der_x509_crl(hsm)
+        assert crl.is_signature_valid(ca_cert.public_key())
+
+
+# --- Phase 3: OCSP (semantic parity + verifies) -----------------------------
+
+def _ocsp_spec(ca, leaf_der, status, algorithm, revocation_time=None, reason=None):
+    ca_cert_der = x509.load_pem_x509_certificate(
+        ca.certificate_pem.encode()).public_bytes(serialization.Encoding.DER)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return OcspResponseSpec(
+        subject_cert_der=leaf_der, issuer_cert_der=ca_cert_der,
+        cert_status=status, this_update=now, next_update=now + timedelta(days=1),
+        revocation_time=revocation_time, revocation_reason=reason, algorithm=algorithm,
+    )
+
+
+def test_ocsp_hsm_matches_software(app, db, hsm_config):
+    with app.app_context():
+        ca = ca_service.create_root_ca(
+            name="OCSP Root RSA", subject_attrs={"CN": "OCSP Root RSA"},
+            key_type="RSA", key_size=2048, validity_days=3650, passphrase=PASSPHRASE,
+        )
+        ca_key = decrypt_private_key(ca.private_key_enc, PASSPHRASE)
+        Pkcs11Backend().import_ca_key(ca_key, label="ocsp-rsa")
+        ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
+        leaf_der = get_backend("software").sign_certificate(
+            _leaf_builder(ca), ca, secret=PASSPHRASE)
+
+        for status, rtime, reason in [
+            (ocsp.OCSPCertStatus.GOOD, None, None),
+            (ocsp.OCSPCertStatus.REVOKED,
+             datetime(2026, 1, 2, tzinfo=timezone.utc), x509.ReasonFlags.key_compromise),
+        ]:
+            spec = _ocsp_spec(ca, leaf_der, status, hashes.SHA1(), rtime, reason)
+            soft = get_backend("software").sign_ocsp(spec, ca, secret=PASSPHRASE)
+            hsm = Pkcs11Backend().sign_ocsp(spec, _hsm_ca(ca, "ocsp-rsa"))
+            rs = ocsp.load_der_ocsp_response(soft)
+            rh = ocsp.load_der_ocsp_response(hsm)
+            assert rh.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL
+            assert rh.certificate_status == rs.certificate_status
+            assert rh.serial_number == rs.serial_number
+            assert rh.issuer_key_hash == rs.issuer_key_hash
+            assert rh.issuer_name_hash == rs.issuer_name_hash
+            assert rh.responder_key_hash == rs.responder_key_hash
+            assert rh.hash_algorithm.name == rs.hash_algorithm.name
+            # the token's signature verifies against the CA public key
+            ca_cert.public_key().verify(
+                rh.signature, rh.tbs_response_bytes,
+                padding.PKCS1v15(), rh.signature_hash_algorithm)
+
+
+# --- Phase 3: full HSM CA lifecycle via the services ------------------------
+
+def test_hsm_ca_end_to_end(app, db, hsm_config):
+    with app.app_context():
+        app.config["KEY_BACKEND"] = "softhsm"
+        ca = ca_service.create_root_ca(
+            name="E2E HSM Root", subject_attrs={"CN": "E2E HSM Root"},
+            key_type="RSA", key_size=2048, validity_days=3650, passphrase=PASSPHRASE,
+        )
+        # keyless in the DB; key lives in the token
+        assert ca.key_backend == "softhsm"
+        assert ca.private_key_enc == b"" and ca.key_label
+        assert ca.has_signing_key and not ca.is_exportable
+        # initial CRL was published at creation
+        assert ca.crl_pem
+        ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
+        x509.load_pem_x509_crl(ca.crl_pem.encode()).is_signature_valid(ca_cert.public_key())
+
+        # issue a leaf certificate (signed by the token)
+        cert = cert_service.create_certificate(
+            ca, {"CN": "leaf.example"}, [], 90, PASSPHRASE,
+            key_type="RSA", key_size=2048)
+        leaf = x509.load_pem_x509_certificate(cert.certificate_pem.encode())
+        leaf.verify_directly_issued_by(ca_cert)
+
+        # OCSP GOOD for that leaf, through the public responder path
+        req = ocsp.OCSPRequestBuilder().add_certificate(
+            leaf, ca_cert, hashes.SHA1()).build()
+        resp = ocsp.load_der_ocsp_response(
+            ocsp_service.build_ocsp_response(
+                req.public_bytes(serialization.Encoding.DER), ca, PASSPHRASE))
+        assert resp.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL
+        assert resp.certificate_status == ocsp.OCSPCertStatus.GOOD
+
+        # revoke and confirm the refreshed CRL lists it (token-signed)
+        crl_service.revoke_certificate(cert.id, passphrase=PASSPHRASE)
+        crl = x509.load_pem_x509_crl(ca.crl_pem.encode())
+        assert crl.is_signature_valid(ca_cert.public_key())
+        assert crl.get_revoked_certificate_by_serial_number(
+            int(cert.serial_number, 16)) is not None
+
+
+# --- Phase 3: cross-backend intermediates -----------------------------------
+
+def test_software_root_signs_hsm_intermediate(app, db, hsm_config):
+    with app.app_context():
+        root = ca_service.create_root_ca(
+            name="XB SW Root", subject_attrs={"CN": "XB SW Root"},
+            key_type="RSA", key_size=2048, validity_days=3650,
+            passphrase=PASSPHRASE, backend="software")
+        inter = ca_service.create_intermediate_ca(
+            "XB HSM Inter", root, {"CN": "XB HSM Inter"},
+            "RSA", 2048, 1825, PASSPHRASE, backend="softhsm")
+        assert inter.key_backend == "softhsm" and inter.private_key_enc == b""
+        root_cert = x509.load_pem_x509_certificate(root.certificate_pem.encode())
+        inter_cert = x509.load_pem_x509_certificate(inter.certificate_pem.encode())
+        inter_cert.verify_directly_issued_by(root_cert)
+        # the HSM intermediate can itself issue a leaf
+        cert = cert_service.create_certificate(
+            inter, {"CN": "leaf2"}, [], 90, PASSPHRASE, key_type="RSA", key_size=2048)
+        x509.load_pem_x509_certificate(cert.certificate_pem.encode()).verify_directly_issued_by(inter_cert)
+
+
+def test_hsm_root_signs_software_intermediate(app, db, hsm_config):
+    with app.app_context():
+        root = ca_service.create_root_ca(
+            name="XB HSM Root", subject_attrs={"CN": "XB HSM Root"},
+            key_type="RSA", key_size=2048, validity_days=3650,
+            passphrase=PASSPHRASE, backend="softhsm")
+        inter = ca_service.create_intermediate_ca(
+            "XB SW Inter", root, {"CN": "XB SW Inter"},
+            "RSA", 2048, 1825, PASSPHRASE, backend="software")
+        assert inter.key_backend == "software" and inter.private_key_enc != b""
+        root_cert = x509.load_pem_x509_certificate(root.certificate_pem.encode())
+        inter_cert = x509.load_pem_x509_certificate(inter.certificate_pem.encode())
+        inter_cert.verify_directly_issued_by(root_cert)

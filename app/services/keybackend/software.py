@@ -37,7 +37,7 @@ class SoftwareBackend(KeyBackend):
     def _secret(self, secret):
         return secret if secret is not None else current_app.config["MASTER_PASSPHRASE"]
 
-    def generate_ca_key(self, key_type, key_size, *, label=None):
+    def generate_ca_key(self, key_type, key_size, *, label=None, secret=None):
         if key_type == "RSA":
             key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
         elif key_type == "EC":
@@ -45,10 +45,10 @@ class SoftwareBackend(KeyBackend):
             key = ec.generate_private_key(curves[key_size])
         else:
             raise ValueError(f"Unsupported key type: {key_type}")
-        return key.public_key(), encrypt_private_key(key, self._secret(None))
+        return key.public_key(), encrypt_private_key(key, self._secret(secret))
 
-    def import_ca_key(self, private_key, *, label=None):
-        return encrypt_private_key(private_key, self._secret(None))
+    def import_ca_key(self, private_key, *, label=None, secret=None):
+        return encrypt_private_key(private_key, self._secret(secret))
 
     def load_public_key(self, ca):
         return x509.load_pem_x509_certificate(ca.certificate_pem.encode()).public_key()
