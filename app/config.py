@@ -54,6 +54,11 @@ class Config:
     # 0 disables the cache (decrypt every request).
     OCSP_KEY_CACHE_TTL_SECONDS = int(os.environ.get("OCSP_KEY_CACHE_TTL_SECONDS") or "300")
 
+    # A1: default backend for NEW CA signing keys. "software" (Fernet-encrypted,
+    # today's behaviour) or "softhsm" (key held in a PKCS#11 token). Existing CAs
+    # keep whatever backend they were created with, per-CA.
+    KEY_BACKEND = os.environ.get("KEY_BACKEND", "software")
+
     OCSP_URL_SCHEME = os.environ.get("OCSP_URL_SCHEME", "http")
     PERMANENT_SESSION_LIFETIME = timedelta(
         minutes=int(os.environ.get("SESSION_LIFETIME_MINUTES", "30"))
