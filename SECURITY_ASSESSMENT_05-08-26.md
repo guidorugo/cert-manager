@@ -3,6 +3,8 @@
 > Application-security & PKI review of the `cert-manager` Flask application.
 > **Assessment date: 2026-08-05.** Method: source, repository, and filesystem inspection plus verification against the pinned runtime dependencies (no live exploitation).
 > This is a **re-assessment** superseding `SECURITY_ASSESSMENT_10-07-26.md` (2026-07-10). It re-verifies every prior finding against the current code and covers the substantial new attack surface added since: **LDAP authentication** (session + Basic Auth, with a credential cache), the **CA import overhaul** (encrypted keys, PKCS#12, chain bundles, certificate-only imports), **CA private-key export**, and a dependency upgrade.
+>
+> **Amendment 2026-08-06:** **A1 (Critical) resolved in v2.0** — a SoftHSM/PKCS#11 key backend now lets CA signing keys live inside a token (non-exportable, never in application memory); see A1 below. This also partially mitigates **F1** and the key-export limb of **A7** for HSM-backed CAs. The A3 write-up was redacted to drop an account username.
 
 ## Scope Statement
 
@@ -53,7 +55,7 @@ This project and this assessment were produced with AI assistance from Anthropic
 - **CA private-key export** endpoint (`/ca/<id>/download?format=key|pkcs12`) → new finding **A7** (direct key-exfiltration channel; the export is admin-only and audited, but the key leaves in the clear).
 - **CA import** of encrypted keys / PKCS#12 / chains → assessed clean apart from an unverified top-of-chain parent link (folded into A7/B-notes).
 
-**Still unremediated from 2026-07-10:** the structural PKI and key-protection findings (A1, B1, B2, B3, C1, E1, and most Medium/Low items) were **not** addressed by this session's feature work and **persist**. See "Status of prior findings."
+**Still unremediated from 2026-07-10:** the structural PKI and key-protection findings (A1, B1, B2, B3, C1, E1, and most Medium/Low items) were **not** addressed by this session's feature work. *(Most were remediated afterwards — B1/B2/B3/C1 in v1.1.0 and **A1 in v2.0** (SoftHSM/PKCS#11) — leaving **E1** (TLS) and the deployment/supply-chain items.)* See "Status of prior findings."
 
 ---
 
@@ -63,7 +65,7 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 
 | # | Severity | Status | Finding | Layer |
 |---|---|---|---|---|
-| A1 | **Critical** | Carried | All CA private keys protected by one env-var passphrase; no HSM; single point of compromise | Key Mgmt |
+| A1 | **Critical** | ✅ **Resolved** | One env-var passphrase / no HSM — **SoftHSM/PKCS#11 key backend added in v2.0**: keys can live in a token (non-exportable, never in app memory), per-CA; software backend still default | Key Mgmt |
 | A7 | **High** | NEW · partly fixed | CA private-key **export over HTTP** — secret-in-GET **fixed in v1.0.1**; unencrypted key PEM, HTTPS enforcement & dual-control residuals open | Key Mgmt |
 | A2 | Medium* | Mitigated | App DB (encrypted keys, hashes, audit) world-readable on host (*High on a shared host); stale `instance/` DB too | Storage |
 | A3 | Medium | ✅ **Resolved** | Live Forgejo password was in `.git/config` — **rotated & de-embedded 2026-08-05** | Secrets |
@@ -105,22 +107,25 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | J1 | Medium | Carried | CI actions pinned by mutable tags, not commit SHAs | CI/CD |
 | J2 | Medium | Carried | No image signing / provenance / SBOM | CI/CD |
 
-Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A large batch was remediated in **v1.1.0** (see below); the headline residual is **A1** (single-passphrase key protection — pending an HSM/KMS decision), the rest of **A7**, and the deployment items (E1 TLS, H1 container, CI supply-chain).
+Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A large batch was remediated in **v1.1.0**, and **A1 (Critical) in v2.0** via a SoftHSM/PKCS#11 key backend (see below); the headline residuals are now the rest of **A7** and the deployment items (E1 TLS, H1 container, CI supply-chain).
 
 **Remediated (2026-08-05):**
 - **Operational:** **A3** (Forgejo credential rotated + de-embedded), **A6** (`venv/` purged from history + tags).
 - **v1.0.1:** the secret-in-GET portion of **A7** (CA `key`/`pkcs12` export made POST-only).
 - **v1.1.0 (security-hardening batch):** **B1** (CSR proof-of-possession enforced), **B2/B3** (revocation regenerates CRLs; revoked sub-CAs now appear in the parent CRL **and** OCSP), **B4** (validity capped and clamped to the CA's expiry), **B5** (minimum RSA 2048), **C1** (OCSP parses + looks up **before** decrypting, caches the CA key; public CRL is read-only), **C2** (`MAX_CONTENT_LENGTH`), **C3** (leaf key/PKCS#12 export POST-only), **C5** (open-redirect backslash), **D6** (LDAP admin-group-only no longer admits the whole directory), **E2** (CSP/HSTS/Referrer-Policy), **G2** (opt-in ProxyFix), **L1** (secure-cookie default). **A2** mitigated: `MASTER_PASSPHRASE` moved to a Docker secret (out of the process env) and the DB tightened to `600`. **A4** accepted (intentional example placeholder).
-- **Headline still-open:** **A1** (single-passphrase key protection — HSM/KMS decision pending), the rest of **A7** (unencrypted key PEM, mandatory HTTPS, dual control), **E1** (no TLS in the shipped stack — L1 hardens the default but a TLS proxy is still required), and the container/CI supply-chain items (H1/H2/I/J).
+- **v2.0 (SoftHSM/PKCS#11 key backend):** **A1** — CA signing keys can be held in a PKCS#11 token (SoftHSM), non-exportable and never resident in application memory; selectable per-CA (software backend remains default), with a one-way `flask keys migrate-to-hsm`. This also **mitigates F1** (HSM keys never enter process memory/swap/core) and the key-export limb of **A7** (HSM-backed CA keys cannot be exported).
+- **Headline still-open:** the rest of **A7** for *software*-backed CAs (unencrypted key PEM, mandatory HTTPS, dual control), **E1** (no TLS in the shipped stack — L1 hardens the default but a TLS proxy is still required), and the container/CI supply-chain items (H1/H2/I/J). *(A1 resolved in v2.0.)*
 
 ---
 
 ## A. Secrets & Key Management
 
-### [CRITICAL] A1 — All CA private keys are protected only by a single environment-variable passphrase — *Carried*
+### [CRITICAL] A1 — All CA private keys are protected only by a single environment-variable passphrase — ✅ *Resolved 2026-08-06 (v2.0)*
 Every CA (and escrowed subscriber) private key is Fernet-encrypted with a key derived by PBKDF2 (600k iters) from one process-wide `MASTER_PASSPHRASE` (`app/config.py:7`), read from an env var and resident for the process lifetime. Any actor who can read the environment (`/proc/<pid>/environ`, `docker inspect`, a crash dump, the compose `.env`) obtains the single secret that decrypts **all** CA keys. No HSM/KMS, no per-CA key wrapping, no split knowledge.
 **Now compounded by A7** — a leaked *URL/log* or a compromised admin session can exfiltrate a CA key directly, without even needing the passphrase.
 **Impact:** total loss of the trust anchor — forge any certificate, sign rogue sub-CAs. **Fix:** move CA key operations behind a KMS/HSM (SoftHSM/PKCS#11 → hardware); interim, per-CA HKDF-wrapped keys sourced from a secrets manager, and require passphrase re-entry for signing rather than holding it resident.
+
+**Resolved (v2.0):** a pluggable key-backend abstraction (`app/services/keybackend/`) adds a **SoftHSM/PKCS#11** backend — a CA's signing key can be generated/held **inside a token** (`CKA_SENSITIVE`, `CKA_EXTRACTABLE=false`), so it never enters Python memory and cannot be exported; signing happens in the token (pyca builds the TBS, the token signs, `asn1crypto` reassembles — cert/CRL byte-identical to the software path, OCSP semantically identical). Backends are chosen **per-CA** and coexist (`key_backend` column); the software backend stays the default (opt-in, with a drop-in path to a hardware HSM). Existing keys migrate one-way via `flask keys migrate-to-hsm`. The single-`MASTER_PASSPHRASE` exposure now remains only for *software*-backed CAs (and the escrowed subscriber keys, A5).
 
 ### [HIGH] A7 — CA private-key export over HTTP (NEW)
 `GET|POST /ca/<id>/download?format=key|pkcs12` (`app/routes/ca.py:209-255`) is a **new** export path. It is correctly `@admin_required` and audit-logged (`download_ca_private_key` / `export_ca_pkcs12`) and refuses certificate-only CAs — but the key nonetheless leaves the trust boundary in the clear:
@@ -135,7 +140,7 @@ Every CA (and escrowed subscriber) private key is Fernet-encrypted with a key de
 `data/cert-manager.db` is mode `0644` (root); a stale `instance/cert-manager.db` (Feb, not gitignored) is also `0644`. These hold the Fernet-encrypted CA keys, password hashes, and audit log. Any local user or co-located container reading the path can copy them (feeds A1). **Revised to Medium** because it is purely a local filesystem-permissions issue on what appears to be a single-operator host with non-default secrets; **it rises to High on any shared/multi-tenant host.** **Fix:** `chmod 600` DB + `.env`; own by a non-root service UID; `chmod 700 data/`; delete the stale `instance/` DB and gitignore `instance/`; encrypt backups.
 
 ### [MEDIUM] A3 — Forgejo credential in `.git/config` — ✅ *Resolved 2026-08-05*
-`.git/config` is per-clone local metadata (regenerated on every clone), so the embedded Forgejo password was a **local-disk exposure only — never distributed in a clone** and never in git history. **Resolved:** the `home` password was rotated (old value confirmed dead), the credential de-embedded from the remote URL and moved to a mode-`600` `credential.helper store`; the same de-embedding was applied to the other local repos that reused it (`CatDetection`, `CatDetection-backup`, `Felisight`), and a sweep confirms none remain. *Operational follow-up: record the new password in a password manager, and check any n8n/automation that used the `home` password (webhooks use a URL/secret and are unaffected).*
+`.git/config` is per-clone local metadata (regenerated on every clone), so the embedded Forgejo password was a **local-disk exposure only — never distributed in a clone** and never in git history. **Resolved:** the account password was rotated (old value confirmed dead), the credential de-embedded from the remote URL and moved to a mode-`600` `credential.helper store`; the same de-embedding was applied to the other local repos that reused it (`CatDetection`, `CatDetection-backup`, `Felisight`), and a sweep confirms none remain. *Operational follow-up: record the new password in a password manager, and check any n8n/automation that used that password (webhooks use a URL/secret and are unaffected).*
 
 ### [MEDIUM] A4 — Insecure default secrets in code and `.env.example` — 🟡 *Accepted (2026-08-05)*
 **Accepted / won't-fix:** the `admin`/`admin` values live in `.env.example` and the compose defaults as intentional example placeholders for first-boot; the `_check_security` startup guard already refuses to run in production with the insecure defaults (`sys.exit(1)`), so a real deployment cannot start on them. Operators must set real secrets (now including the `MASTER_PASSPHRASE` Docker secret). Original note retained below for context.
@@ -233,8 +238,8 @@ Only `X-Content-Type-Options`/`X-Frame-Options` are set; no CSP/HSTS/Referrer-Po
 
 ## F. Runtime Security
 
-### [MEDIUM] F1 — Key material not zeroizable; memory-resident — *Carried*
-Decrypted keys and the passphrase are ordinary Python objects (immutable `bytes`/`str`), not wiped after use; they can persist in memory, swap, and core dumps. **Fix:** minimize key lifetime; disable swap/core dumps for the process; prefer an HSM/KMS so plaintext keys never enter the app (A1).
+### [MEDIUM] F1 — Key material not zeroizable; memory-resident — *Carried (mitigated for HSM CAs, v2.0)*
+Decrypted keys and the passphrase are ordinary Python objects (immutable `bytes`/`str`), not wiped after use; they can persist in memory, swap, and core dumps. **Fix:** minimize key lifetime; disable swap/core dumps for the process; prefer an HSM/KMS so plaintext keys never enter the app (A1). **Mitigated (v2.0):** for **HSM-backed CAs** (A1) the signing key stays in the PKCS#11 token and never enters Python memory/swap/core dumps; this finding now applies only to *software*-backed CA keys and the leaf keys the server escrows (A5).
 
 ### [MEDIUM] F2 — Debug mode exposes the Werkzeug debugger and bypasses the insecure-default guard — *Carried*
 `_check_security` returns early under `app.debug` (`app/__init__.py:137`); as shipped (gunicorn, no `FLASK_DEBUG`) the checks run — but running with `--debug`/`FLASK_DEBUG=1` in production both disables insecure-default rejection and exposes the PIN-guarded Werkzeug console (RCE). **Fix:** never enable debug in production; keep the guard active regardless of debug; document prominently.
@@ -324,7 +329,7 @@ Real security investment; preserve and build on these:
 
 ## Executive Risk Summary
 
-Since the 2026-07-10 review the project has **added capability faster than it has closed its structural risks.** The new LDAP authentication and CA import paths are, to their credit, carefully built — LDAP injection is fully defended and fail-closed, and CA import verifies chains and forces `ca=False` — so they introduce no new Critical/High auth-bypass or mis-issuance primitive. The dependency upgrade genuinely removed a stale-dependency gap. But the crown-jewel weaknesses are unchanged: every CA key is still guarded by a single environment-variable passphrase co-located with a world-readable database (A1/A2), the CA still signs CSRs without proof-of-possession (B1) and fails to publish revocation to CRLs for both certificates and intermediate CAs (B2/B3), the unauthenticated OCSP endpoint still amplifies the deliberately-slow KDF into a trivial denial-of-service (C1), and the shipped stack still terminates no TLS (E1). On top of that unresolved base, this session added a **direct CA private-key export channel** (A7): the key now leaves the trust boundary as an unencrypted PEM over cleartext HTTP, with a PKCS#12 password that can land in a query-string log and an empty default — a materially larger blast radius that a single compromised admin (D4) can trigger, recorded only in a mutable audit log (G1). LDAP adds three configuration footguns (an admin-group-only policy silently admits the whole directory, a 60-second credential-cache window over directory-side revocation, and plaintext binds allowed at startup) that are Medium individually but compound the authentication weaknesses. The net posture: the newest code is the strongest, but it sits on a foundation whose key-protection, revocation, DoS, and transport gaps still provide a credible path from a modest foothold to full trust-anchor compromise.
+Since the 2026-07-10 review the project has **added capability faster than it has closed its structural risks.** The new LDAP authentication and CA import paths are, to their credit, carefully built — LDAP injection is fully defended and fail-closed, and CA import verifies chains and forces `ca=False` — so they introduce no new Critical/High auth-bypass or mis-issuance primitive. The dependency upgrade genuinely removed a stale-dependency gap. But the crown-jewel weaknesses are unchanged: every CA key is still guarded by a single environment-variable passphrase co-located with a world-readable database (A1/A2), the CA still signs CSRs without proof-of-possession (B1) and fails to publish revocation to CRLs for both certificates and intermediate CAs (B2/B3), the unauthenticated OCSP endpoint still amplifies the deliberately-slow KDF into a trivial denial-of-service (C1), and the shipped stack still terminates no TLS (E1). On top of that unresolved base, this session added a **direct CA private-key export channel** (A7): the key now leaves the trust boundary as an unencrypted PEM over cleartext HTTP, with a PKCS#12 password that can land in a query-string log and an empty default — a materially larger blast radius that a single compromised admin (D4) can trigger, recorded only in a mutable audit log (G1). LDAP adds three configuration footguns (an admin-group-only policy silently admits the whole directory, a 60-second credential-cache window over directory-side revocation, and plaintext binds allowed at startup) that are Medium individually but compound the authentication weaknesses. The net posture: the newest code is the strongest, but it sits on a foundation whose key-protection, revocation, DoS, and transport gaps still provide a credible path from a modest foothold to full trust-anchor compromise. **Update (v2.0):** the revocation gaps (B1/B2/B3) and the OCSP DoS (C1) were closed in v1.1.0, and **A1 has since been resolved** — a SoftHSM/PKCS#11 key backend removes the single-passphrase dependency for HSM-backed CAs (keys non-exportable, never in app memory), also mitigating F1 and the A7 export limb for those CAs. The largest remaining structural gap is **E1** (no TLS in the shipped stack) plus the container/CI supply-chain items.
 
 ## Prioritized Remediation Roadmap
 
@@ -347,7 +352,7 @@ Since the 2026-07-10 review the project has **added capability faster than it ha
 - **B4:** enforce issuance-profile limits server-side (max validity, `not_after ≤ CA.not_after`, path length, Name Constraints); stop escrowing subscriber keys by default (A5).
 
 **Medium-term (3–6 months) — systematic improvements & tooling**
-- **A1/F1:** KMS/HSM-backed CA key operations (SoftHSM/PKCS#11 → hardware), or per-CA HKDF-wrapped keys from a secrets manager.
+- **A1/F1:** ✅ *Done (v2.0)* — SoftHSM/PKCS#11 key backend (keys non-exportable, never in app memory; drop-in path to a hardware HSM). Per-CA HKDF-wrapping from a secrets manager remains an option for software-backed CAs.
 - **G1:** tamper-evident, externally-retained audit logging with anomaly alerting on high-risk actions (key export, CA revoke, role change).
 - **I1/I2/I3/H2/J1/J2:** hash-locked dependencies (`--require-hashes`), digest-pinned base image, SHA-pinned CI actions, Trivy/pip-audit gates, cosign signing + SLSA provenance + SBOM; track the dormant `ldap3`.
 - **B6:** delegated OCSP-signing certificate with nonce support.
