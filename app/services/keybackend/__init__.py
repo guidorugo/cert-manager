@@ -45,4 +45,25 @@ def backend_for_ca(ca) -> KeyBackend:
     return get_backend(getattr(ca, "key_backend", None) or "software")
 
 
-__all__ = ["KeyBackend", "OcspResponseSpec", "get_backend", "backend_for_ca", "default_backend_name"]
+def hsm_available() -> bool:
+    """Whether the softhsm backend can plausibly be used right now: library
+    importable, PKCS#11 module present, and a user PIN configured. Used to
+    decide whether to offer HSM in the create/import UI (not a hard guarantee
+    the token is reachable — signing surfaces any real error)."""
+    import os
+    try:
+        import pkcs11  # noqa: F401
+    except Exception:
+        return False
+    try:
+        cfg = current_app.config
+    except RuntimeError:
+        return False
+    module = cfg.get("PKCS11_MODULE")
+    return bool(cfg.get("PKCS11_USER_PIN")) and bool(module) and os.path.exists(module)
+
+
+__all__ = [
+    "KeyBackend", "OcspResponseSpec", "get_backend", "backend_for_ca",
+    "default_backend_name", "hsm_available",
+]
