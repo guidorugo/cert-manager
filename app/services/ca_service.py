@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from cryptography import x509
@@ -10,6 +11,12 @@ from ..extensions import db
 from ..models.ca import CertificateAuthority
 from .crypto_utils import encrypt_private_key, decrypt_private_key
 from .policy import enforce_key_strength, bounded_not_after
+from .keybackend import get_backend, backend_for_ca, default_backend_name
+
+
+def _key_label():
+    """Unique PKCS#11 object label for a new CA key (HSM backends)."""
+    return "ca-" + uuid.uuid4().hex
 
 MAX_PEM_SIZE = 64 * 1024  # 64KB
 
@@ -20,7 +27,7 @@ def _publish_initial_crl(ca, passphrase):
     Best-effort — the CA already exists; a failure just defers the CRL to the
     admin 'Generate CRL' action or the first revocation.
     """
-    if not ca or not ca.private_key_enc:
+    if not ca or not ca.has_signing_key:
         return
     from . import crl_service
     import logging
@@ -64,10 +71,15 @@ def _get_hash_algorithm(key):
 
 
 def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passphrase,
-                   path_length=None):
-    key = _generate_key(key_type, key_size)
-    subject = _build_subject(subject_attrs)
+                   path_length=None, backend=None):
+    enforce_key_strength(key_type, key_size)  # B5
+    backend_name = backend or default_backend_name()
+    kb = get_backend(backend_name)
+    label = _key_label()
+    public_key, key_ref = kb.generate_ca_key(
+        key_type, key_size, label=label, secret=passphrase)
 
+    subject = _build_subject(subject_attrs)
     now = datetime.now(timezone.utc)
     not_after = bounded_not_after(now, validity_days, is_ca=True)  # B4
     serial = x509.random_serial_number()
@@ -76,7 +88,7 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(subject)
-        .public_key(key.public_key())
+        .public_key(public_key)
         .serial_number(serial)
         .not_valid_before(now)
         .not_valid_after(not_after)
@@ -99,25 +111,26 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
             critical=True,
         )
         .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()),
+            x509.SubjectKeyIdentifier.from_public_key(public_key),
             critical=False,
         )
         .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(public_key),
             critical=False,
         )
     )
 
-    cert = builder.sign(key, _get_hash_algorithm(key))
-    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-    enc_key = encrypt_private_key(key, passphrase)
-
+    # A root signs its own certificate. Build the (uncommitted) CA object first
+    # so the backend can sign with it (software reads private_key_enc, HSM reads
+    # key_type/key_label); the certificate does not exist yet, hence the
+    # column-based key lookup in the backend.
     ca = CertificateAuthority(
         name=name,
         common_name=subject_attrs.get("CN", name),
         serial_number=format(serial, "x"),
-        certificate_pem=cert_pem,
-        private_key_enc=enc_key,
+        private_key_enc=(key_ref if backend_name == "software" else b""),
+        key_backend=backend_name,
+        key_label=(label if backend_name != "software" else None),
         parent_id=None,
         is_root=True,
         key_type=key_type,
@@ -126,6 +139,9 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
         not_after=not_after,
         path_length=path_length,
     )
+    cert_der = kb.sign_certificate(builder, ca, secret=passphrase)
+    ca.certificate_pem = x509.load_der_x509_certificate(cert_der).public_bytes(
+        serialization.Encoding.PEM).decode()
     db.session.add(ca)
     db.session.commit()
     _publish_initial_crl(ca, passphrase)
@@ -133,14 +149,21 @@ def create_root_ca(name, subject_attrs, key_type, key_size, validity_days, passp
 
 
 def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
-                           validity_days, passphrase, path_length=None):
-    if not parent_ca.private_key_enc:
+                           validity_days, passphrase, path_length=None, backend=None):
+    if not parent_ca.has_signing_key:
         raise ValueError("Parent CA was imported without its private key and cannot sign a new intermediate CA.")
+    enforce_key_strength(key_type, key_size)  # B5
 
-    key = _generate_key(key_type, key_size)
+    # The child key lives in the child's chosen backend; the parent's backend
+    # signs the child certificate (software and HSM parents/children mix freely).
+    backend_name = backend or default_backend_name()
+    child_kb = get_backend(backend_name)
+    label = _key_label()
+    public_key, key_ref = child_kb.generate_ca_key(
+        key_type, key_size, label=label, secret=passphrase)
+
     subject = _build_subject(subject_attrs)
     parent_cert = x509.load_pem_x509_certificate(parent_ca.certificate_pem.encode())
-    parent_key = decrypt_private_key(parent_ca.private_key_enc, passphrase)
 
     now = datetime.now(timezone.utc)
     # B4: bound to the CA maximum and never outlive the parent CA.
@@ -151,7 +174,7 @@ def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(parent_cert.subject)
-        .public_key(key.public_key())
+        .public_key(public_key)
         .serial_number(serial)
         .not_valid_before(now)
         .not_valid_after(not_after)
@@ -174,7 +197,7 @@ def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
             critical=True,
         )
         .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()),
+            x509.SubjectKeyIdentifier.from_public_key(public_key),
             critical=False,
         )
         .add_extension(
@@ -187,16 +210,13 @@ def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
         )
     )
 
-    cert = builder.sign(parent_key, _get_hash_algorithm(parent_key))
-    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-    enc_key = encrypt_private_key(key, passphrase)
-
     ca = CertificateAuthority(
         name=name,
         common_name=subject_attrs.get("CN", name),
         serial_number=format(serial, "x"),
-        certificate_pem=cert_pem,
-        private_key_enc=enc_key,
+        private_key_enc=(key_ref if backend_name == "software" else b""),
+        key_backend=backend_name,
+        key_label=(label if backend_name != "software" else None),
         parent_id=parent_ca.id,
         is_root=False,
         key_type=key_type,
@@ -205,6 +225,10 @@ def create_intermediate_ca(name, parent_ca, subject_attrs, key_type, key_size,
         not_after=not_after,
         path_length=path_length,
     )
+    cert_der = backend_for_ca(parent_ca).sign_certificate(
+        builder, parent_ca, secret=passphrase)
+    ca.certificate_pem = x509.load_der_x509_certificate(cert_der).public_bytes(
+        serialization.Encoding.PEM).decode()
     db.session.add(ca)
     db.session.commit()
     _publish_initial_crl(ca, passphrase)
@@ -475,10 +499,20 @@ def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None, key_passphras
     return ca
 
 
+def _refuse_if_not_exportable(ca, cert_only_msg):
+    """Raise if the CA key cannot be exported: HSM keys are non-extractable,
+    certificate-only imports have no key. Software-keyed CAs pass through."""
+    if ca.is_exportable:
+        return
+    if ca.key_backend == "softhsm":
+        raise ValueError("This CA's key is held in the HSM token and cannot be exported.")
+    raise ValueError(cert_only_msg)
+
+
 def export_ca_key_pem(ca, passphrase):
     """Decrypt and return the CA's private key as unencrypted PKCS#8 PEM."""
-    if not ca.private_key_enc:
-        raise ValueError("This CA was imported without its private key; there is no key to export.")
+    _refuse_if_not_exportable(
+        ca, "This CA was imported without its private key; there is no key to export.")
     key = decrypt_private_key(ca.private_key_enc, passphrase)
     return key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -495,8 +529,8 @@ def export_ca_pkcs12(ca, passphrase, export_password):
     """
     from cryptography.hazmat.primitives.serialization import BestAvailableEncryption, pkcs12
 
-    if not ca.private_key_enc:
-        raise ValueError("This CA was imported without its private key; PKCS#12 export is not possible.")
+    _refuse_if_not_exportable(
+        ca, "This CA was imported without its private key; PKCS#12 export is not possible.")
     if not export_password:
         raise ValueError("An export password is required for PKCS#12.")
 

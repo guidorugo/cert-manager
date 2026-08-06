@@ -7,5 +7,10 @@ Flask-Login==0.6.3
 python-dotenv==1.2.2
 gunicorn==26.0.0
 ldap3==2.9.1
+# A1 SoftHSM/PKCS#11 key backend (only used when KEY_BACKEND=softhsm; the
+# software backend has no extra runtime deps). asn1crypto assembles the signed
+# X.509 objects around the token signature; python-pkcs11 talks to the token.
+python-pkcs11==0.9.5
+asn1crypto==1.5.1
 # Optional: uncomment to enable rate limiting
 # Flask-Limiter==4.1.1

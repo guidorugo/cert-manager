@@ -26,6 +26,11 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      - name: Install SoftHSM (exercises the KEY_BACKEND=softhsm path)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends softhsm2 opensc libffi-dev
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -37,6 +42,9 @@ jobs:
 
   build-and-push:
     needs: test
+    # PRs run tests only. On a push to master the image is built for validation
+    # (not published); it is built AND published only on a v* release tag.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     permissions:
@@ -51,7 +59,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -63,8 +71,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` tracks the newest v* release tag (latest=auto), not master.
+          flavor: |
+            latest=auto
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -72,7 +82,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          # Publish only on a v* tag; master builds are validation-only.
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

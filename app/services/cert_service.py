@@ -11,6 +11,7 @@ from ..extensions import db
 from ..models.certificate import Certificate
 from .crypto_utils import encrypt_private_key, decrypt_private_key
 from .policy import enforce_key_strength, enforce_public_key_strength, bounded_not_after
+from .keybackend import backend_for_ca
 
 
 def _generate_key(key_type: str, key_size: int):
@@ -75,10 +76,9 @@ EKU_MAP = {
 def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
              key_usage=None, extended_key_usage=None, ocsp_url=None,
              crl_dp_url=None):
-    if not ca.private_key_enc:
+    if not ca.has_signing_key:
         raise ValueError("This CA was imported without its private key and cannot issue certificates.")
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
-    ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
     csr = x509.load_pem_x509_csr(csr_model.csr_pem.encode())
 
     # Proof-of-possession (B1): the CSR must be validly self-signed, proving
@@ -199,7 +199,8 @@ def sign_csr(csr_model, ca, validity_days, passphrase, san_list=None,
             critical=False,
         )
 
-    cert = builder.sign(ca_key, _get_hash_algorithm(ca_key))
+    cert_der = backend_for_ca(ca).sign_certificate(builder, ca, secret=passphrase)
+    cert = x509.load_der_x509_certificate(cert_der)
     cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
 
     # Determine key info from CSR public key
@@ -248,10 +249,9 @@ def create_certificate(ca, subject_attrs, san_list, validity_days, passphrase,
                        key_type="RSA", key_size=2048, key_usage=None,
                        extended_key_usage=None, ocsp_url=None,
                        crl_dp_url=None):
-    if not ca.private_key_enc:
+    if not ca.has_signing_key:
         raise ValueError("This CA was imported without its private key and cannot issue certificates.")
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
-    ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
 
     key = _generate_key(key_type, key_size)
     subject = _build_subject(subject_attrs)
@@ -365,7 +365,8 @@ def create_certificate(ca, subject_attrs, san_list, validity_days, passphrase,
             critical=False,
         )
 
-    cert = builder.sign(ca_key, _get_hash_algorithm(ca_key))
+    cert_der = backend_for_ca(ca).sign_certificate(builder, ca, secret=passphrase)
+    cert = x509.load_der_x509_certificate(cert_der)
     cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
     enc_key = encrypt_private_key(key, passphrase)
 

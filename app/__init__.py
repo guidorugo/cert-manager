@@ -28,6 +28,7 @@ def create_app(config_class=Config):
 
     _check_security(app)
     _validate_ldap_config(app)
+    _validate_key_backend_config(app)
     _configure_session(app)
     _setup_security_headers(app)
     _setup_rate_limiting(app)
@@ -47,6 +48,9 @@ def create_app(config_class=Config):
     app.register_blueprint(csr_bp)
     app.register_blueprint(public_bp)
     app.register_blueprint(users_bp)
+
+    from .cli import keys_cli
+    app.cli.add_command(keys_cli)
 
     with app.app_context():
         from . import models  # noqa: F401
@@ -198,6 +202,29 @@ def _validate_ldap_config(app):
                   "(anonymous directory search is not supported).")
 
 
+def _validate_key_backend_config(app):
+    """Fail fast when KEY_BACKEND=softhsm but the PKCS#11 token can't be used."""
+    if app.config.get("KEY_BACKEND") != "softhsm":
+        return
+
+    def fatal(msg):
+        print(f"FATAL: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        import pkcs11  # noqa: F401
+    except Exception as exc:
+        fatal(f"KEY_BACKEND=softhsm but python-pkcs11 is not importable: {exc}")
+
+    module = app.config.get("PKCS11_MODULE")
+    if not module or not os.path.exists(module):
+        fatal(f"KEY_BACKEND=softhsm but PKCS11_MODULE does not exist: {module!r}")
+    if not app.config.get("PKCS11_TOKEN_LABEL"):
+        fatal("KEY_BACKEND=softhsm but PKCS11_TOKEN_LABEL is not set.")
+    if not app.config.get("PKCS11_USER_PIN"):
+        fatal("KEY_BACKEND=softhsm but PKCS11_USER_PIN (or PKCS11_USER_PIN_FILE) is not set.")
+
+
 def _setup_security_headers(app):
     """Add security response headers to all responses."""
 
@@ -299,6 +326,15 @@ def _migrate_schema():
         if "revocation_reason" not in columns:
             db.session.execute(text(
                 "ALTER TABLE certificate_authorities ADD COLUMN revocation_reason VARCHAR(50)"
+            ))
+        # A1 key-backend columns (existing CAs are software-backed)
+        if "key_backend" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN key_backend VARCHAR(20) NOT NULL DEFAULT 'software'"
+            ))
+        if "key_label" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN key_label VARCHAR(200)"
             ))
 
     # Migrate certificates table

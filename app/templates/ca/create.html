@@ -92,6 +92,21 @@
                                     </div>
                                 </div>
                             </div>
+                            {% if hsm_available %}
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="mb-3">
+                                        <label for="key_backend" class="form-label">Key Protection
+                                            <span class="field-info" data-bs-toggle="tooltip" title="Where the CA private key lives. Software: Fernet-encrypted at rest, exportable. HSM: generated inside a SoftHSM/PKCS#11 token and non-exportable (stronger protection for a root you never need to move).">!</span>
+                                        </label>
+                                        <select class="form-select" id="key_backend" name="key_backend">
+                                            <option value="software" selected>Software (encrypted at rest, exportable)</option>
+                                            <option value="softhsm">HSM &mdash; SoftHSM / PKCS#11 (non-exportable)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>

@@ -1,43 +1,14 @@
-import hashlib
-import threading
-import time
 from datetime import datetime, timedelta, timezone
 
-from flask import current_app
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509 import ocsp
 
 from ..models.certificate import Certificate
 from ..models.ca import CertificateAuthority
-from .crypto_utils import decrypt_private_key
+from .keybackend import backend_for_ca, OcspResponseSpec
 
 OCSP_RESPONSE_VALIDITY_HOURS = 24
-
-# In-memory cache of decrypted CA signing keys so an unauthenticated OCSP
-# flood doesn't run 600k-PBKDF2 per request (C1). Keyed by ca.id, guarded by a
-# fingerprint of the ciphertext so a re-imported/rotated key invalidates.
-_key_cache = {}
-_key_cache_lock = threading.Lock()
-
-
-def _get_ca_signing_key(ca, passphrase):
-    try:
-        ttl = current_app.config.get("OCSP_KEY_CACHE_TTL_SECONDS", 300)
-    except RuntimeError:
-        ttl = 0
-    if ttl <= 0:
-        return decrypt_private_key(ca.private_key_enc, passphrase)
-    fingerprint = hashlib.sha256(ca.private_key_enc).digest()
-    now = time.monotonic()
-    with _key_cache_lock:
-        entry = _key_cache.get(ca.id)
-        if entry and entry[0] == fingerprint and entry[2] > now:
-            return entry[1]
-    key = decrypt_private_key(ca.private_key_enc, passphrase)
-    with _key_cache_lock:
-        _key_cache[ca.id] = (fingerprint, key, time.monotonic() + ttl)
-    return key
 
 _ALLOWED_OCSP_HASHES = (
     hashes.SHA1, hashes.SHA224, hashes.SHA256, hashes.SHA384, hashes.SHA512,
@@ -83,7 +54,7 @@ def _unauthorized():
 def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
     # A certificate-only CA can never sign a response — return an unsigned
     # UNAUTHORIZED without parsing or decrypting anything.
-    if not ca.private_key_enc:
+    if not ca.has_signing_key:
         return _unauthorized()
 
     # C1: parse the request and look up the subject BEFORE decrypting the CA
@@ -105,39 +76,35 @@ def build_ocsp_response(ocsp_request_der: bytes, ca, passphrase: str) -> bytes:
     if subject is None:
         return _unauthorized()
 
-    ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
-    ca_key = _get_ca_signing_key(ca, passphrase)
-    cert_obj = x509.load_pem_x509_certificate(subject.certificate_pem.encode())
+    ca_cert_der = x509.load_pem_x509_certificate(
+        ca.certificate_pem.encode()
+    ).public_bytes(serialization.Encoding.DER)
+    subject_cert_der = x509.load_pem_x509_certificate(
+        subject.certificate_pem.encode()
+    ).public_bytes(serialization.Encoding.DER)
 
     now = datetime.now(timezone.utc)
     next_update = now + timedelta(hours=OCSP_RESPONSE_VALIDITY_HOURS)
 
     if subject.is_revoked:
+        cert_status = ocsp.OCSPCertStatus.REVOKED
         revocation_time = subject.revoked_at or now
-        reason = _REVOCATION_REASONS.get(
+        revocation_reason = _REVOCATION_REASONS.get(
             subject.revocation_reason, x509.ReasonFlags.unspecified
         )
-        builder = ocsp.OCSPResponseBuilder().add_response(
-            cert=cert_obj,
-            issuer=ca_cert,
-            algorithm=algorithm,
-            cert_status=ocsp.OCSPCertStatus.REVOKED,
-            this_update=now,
-            next_update=next_update,
-            revocation_time=revocation_time,
-            revocation_reason=reason,
-        ).responder_id(ocsp.OCSPResponderEncoding.HASH, ca_cert)
     else:
-        builder = ocsp.OCSPResponseBuilder().add_response(
-            cert=cert_obj,
-            issuer=ca_cert,
-            algorithm=algorithm,
-            cert_status=ocsp.OCSPCertStatus.GOOD,
-            this_update=now,
-            next_update=next_update,
-            revocation_time=None,
-            revocation_reason=None,
-        ).responder_id(ocsp.OCSPResponderEncoding.HASH, ca_cert)
+        cert_status = ocsp.OCSPCertStatus.GOOD
+        revocation_time = None
+        revocation_reason = None
 
-    response = builder.sign(ca_key, hashes.SHA256())
-    return response.public_bytes(serialization.Encoding.DER)
+    spec = OcspResponseSpec(
+        subject_cert_der=subject_cert_der,
+        issuer_cert_der=ca_cert_der,
+        cert_status=cert_status,
+        this_update=now,
+        next_update=next_update,
+        revocation_time=revocation_time,
+        revocation_reason=revocation_reason,
+        algorithm=algorithm,
+    )
+    return backend_for_ca(ca).sign_ocsp(spec, ca, secret=passphrase)

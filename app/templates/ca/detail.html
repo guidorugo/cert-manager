@@ -7,8 +7,11 @@
         {% if ca.is_revoked %}
         <span class="badge bg-danger">Revoked</span>
         {% endif %}
-        {% if not ca.has_private_key %}
+        {% if not ca.has_signing_key %}
         <span class="badge bg-secondary" data-bs-toggle="tooltip" title="Imported without a private key: cannot issue certificates, sign CRLs, or answer OCSP.">Cert-only</span>
+        {% endif %}
+        {% if ca.key_backend == 'softhsm' %}
+        <span class="badge bg-info text-dark" data-bs-toggle="tooltip" title="Signing key held in a PKCS#11 token (SoftHSM); non-exportable.">HSM</span>
         {% endif %}
     </h2>
     <div>
@@ -16,8 +19,9 @@
             <a href="{{ url_for('public.download_ca_cert', ca_id=ca.id) }}" class="btn btn-outline-primary btn-sm">Cert</a>
             <a href="{{ url_for('ca.download', ca_id=ca.id, format='chain') }}" class="btn btn-outline-primary btn-sm">Chain</a>
         </div>
-        {% if ca.has_private_key %}
-        {# Private-key export is POST-only so the key PEM never lands in a GET URL/log #}
+        {% if ca.is_exportable %}
+        {# Private-key export is POST-only so the key PEM never lands in a GET URL/log.
+           Hidden for HSM CAs: the key is non-exportable by design. #}
         <form method="POST" action="{{ url_for('ca.download', ca_id=ca.id) }}" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="format" value="key">
@@ -25,7 +29,7 @@
         </form>
         {% endif %}
         {% if not ca.is_revoked %}
-        {% if ca.has_private_key %}
+        {% if ca.has_signing_key %}
         <form method="POST" action="{{ url_for('ca.generate_crl', ca_id=ca.id) }}" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-outline-warning btn-sm">Generate CRL</button>
@@ -49,7 +53,19 @@
                     {% endif %}
                     <tr><th>Serial Number</th><td><code>{{ ca.serial_number }}</code></td></tr>
                     <tr><th>Key Type</th><td>{{ ca.key_type }} {{ ca.key_size }}</td></tr>
-                    <tr><th>Private Key</th><td>{{ "Available" if ca.has_private_key else "Not stored (certificate-only import)" }}</td></tr>
+                    <tr><th>Key Protection</th><td>
+                        {% if ca.key_backend == 'softhsm' %}
+                        <span class="badge bg-info text-dark">HSM (SoftHSM / PKCS#11)</span>
+                        {% if ca.key_label %}<code class="ms-1">{{ ca.key_label }}</code>{% endif %}
+                        {% else %}
+                        Software (encrypted at rest)
+                        {% endif %}
+                    </td></tr>
+                    <tr><th>Private Key</th><td>
+                        {% if ca.key_backend == 'softhsm' %}Held in HSM token (non-exportable)
+                        {% elif ca.has_private_key %}Available
+                        {% else %}Not stored (certificate-only import){% endif %}
+                    </td></tr>
                     <tr><th>Valid From</th><td>{{ ca.not_before.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
                     <tr><th>Valid Until</th><td>{{ ca.not_after.strftime('%Y-%m-%d %H:%M UTC') }}</td></tr>
                     <tr><th>Path Length</th><td>{{ ca.path_length if ca.path_length is not none else "Unlimited" }}</td></tr>
@@ -70,7 +86,7 @@
                 <p><strong>CA Certificate:</strong><br>
                     <a href="{{ url_for('public.download_ca_cert', ca_id=ca.id) }}">{{ url_for('public.download_ca_cert', ca_id=ca.id, _external=True) }}</a>
                 </p>
-                {% if ca.has_private_key %}
+                {% if ca.has_signing_key %}
                 <p><strong>CRL (DER):</strong><br>
                     <a href="{{ url_for('public.download_crl_der', ca_id=ca.id) }}">{{ url_for('public.download_crl_der', ca_id=ca.id, _external=True) }}</a>
                 </p>
@@ -91,7 +107,7 @@
                 <pre class="bg-body-tertiary p-2" style="max-height:200px;overflow:auto;font-size:0.75rem">{{ chain }}</pre>
             </div>
         </div>
-        {% if ca.has_private_key %}
+        {% if ca.is_exportable %}
         <div class="card mb-3">
             <div class="card-header">Export PKCS#12</div>
             <div class="card-body">
@@ -115,7 +131,7 @@
 <div class="card mt-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Issued Certificates</h5>
-        {% if not ca.is_revoked and ca.has_private_key %}
+        {% if not ca.is_revoked and ca.has_signing_key %}
         <a href="{{ url_for('certificates.create') }}" class="btn btn-sm btn-primary">Issue Certificate</a>
         {% endif %}
     </div>

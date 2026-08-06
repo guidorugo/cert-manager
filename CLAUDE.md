@@ -46,12 +46,13 @@ python -m pytest tests/ -v
 
 ## CI/CD
 - **GitHub Actions workflow**: `.github/workflows/docker-publish.yml`
-- **Triggers**: Push to `master` (builds + pushes `latest`), `v*` tags (pushes semver tags), PRs (build-only validation).
+- **Triggers**: PRs → tests only. Push to `master` → tests + image build for validation (**not published**). `v*` tags → tests + build + **publish** (semver tags + `latest`). Publishing is gated to release tags so a merge never auto-pushes an image.
 - **Registry**: `ghcr.io/guidorugo/cert-manager` — uses `GITHUB_TOKEN`, no extra secrets needed.
 - **`.dockerignore`**: Excludes `venv/`, `tests/`, `.env`, `.git/`, etc. from the Docker build context.
 
 ## Key Design Decisions
 - **Private key encryption**: Fernet + PBKDF2-HMAC-SHA256 (600k iterations). Salt stored with ciphertext.
+- **Key backends (A1, SoftHSM/PKCS#11)**: A CA's signing key lives behind a `KeyBackend` (`app/services/keybackend/`). Default `software` = today's Fernet-encrypted key; opt-in `softhsm` = key held in a PKCS#11 token, never in Python memory. Selected per-CA (`CertificateAuthority.key_backend`/`key_label` columns); `KEY_BACKEND` sets the default for new CAs, and the create form offers HSM per-CA when `hsm_available()`. Three-state model guards: `has_signing_key` (issue/CRL/OCSP/sub-CA — true for software+HSM), `is_exportable` (key/PKCS#12 export — software only), `signing_capable()` query. pyca can't sign with a PKCS#11 key, so the HSM backend builds the TBS with a same-algorithm throwaway key and swaps in the token's signature via `asn1crypto` (cert/CRL are byte-identical to software for RSA; OCSP is assembled directly since pyca refuses signer≠responder, reusing a throwaway pyca request's CertID). RSA uses `CKM_SHA256_RSA_PKCS`; EC signs the SHA-256 digest with raw `CKM_ECDSA` (SoftHSM lacks `CKM_ECDSA_SHA256`). Cross-backend intermediates work (parent's backend signs the child). Migrate existing keys one-way with `flask keys migrate-to-hsm`; HSM keys are `CKA_EXTRACTABLE=false` so export is refused. Deployment stays single-container (softhsm2 in the image; entrypoint inits the token when `SOFTHSM2_CONF` is set). Differential tests in `tests/test_softhsm.py` gate byte-parity (skip cleanly without SoftHSM; CI installs it).
 - **Master passphrase**: From `MASTER_PASSPHRASE` env var. Used for all key encrypt/decrypt.
 - **OCSP**: Built-in responder at `/public/ocsp/<ca_id>`. Certificates include AIA extension.
 - **CRL Distribution Points**: Auto-populated in certificates using `{scheme}://{server}/public/crl/{ca_id}.crl`. Added via `crl_dp_url` parameter in `cert_service.create_certificate()` and `cert_service.sign_csr()`. The CRL DP field in the create/sign forms is **editable** — users can override the auto-generated URL per-certificate. When `SERVER_NAME_FOR_OCSP` is at its default `localhost:5000`, the hostname is **auto-detected from `request.host`**. A warning banner appears in Advanced Settings when the detected hostname contains `localhost`.
@@ -119,6 +120,11 @@ python -m pytest tests/ -v
 - `MAX_CERT_VALIDITY_DAYS` / `MAX_CA_VALIDITY_DAYS` - Issuance validity caps (default: 825 / 7305); certs are also clamped to the issuing CA's expiry
 - `MIN_RSA_KEY_SIZE` - Minimum RSA key size accepted (default: 2048)
 - `OCSP_KEY_CACHE_TTL_SECONDS` - In-memory TTL for the decrypted CA signing key used by OCSP (default: 300, 0 disables)
+- `KEY_BACKEND` - Default signing-key backend for new CAs: `software` (default) or `softhsm`
+- `PKCS11_MODULE` - PKCS#11 library path (default: `/usr/lib/softhsm/libsofthsm2.so`)
+- `PKCS11_TOKEN_LABEL` - Token label (default: `cert-manager`)
+- `PKCS11_USER_PIN` / `PKCS11_SO_PIN` - Token PINs (support the `_FILE` secret convention)
+- `SOFTHSM2_CONF` - SoftHSM config path; when set, the entrypoint creates the token dir and inits the token
 - `MASTER_PASSPHRASE_FILE` / `SECRET_KEY_FILE` / `ADMIN_PASSWORD_FILE` - Read the secret from a file (Docker/systemd secret) instead of the env var
 - `LDAP_ENABLED` - Enable LDAP login (default: false)
 - `LDAP_SERVER_URI` - Directory URI(s), comma-separated for failover (e.g. `ldaps://dc01:636`)
