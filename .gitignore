@@ -12,6 +12,9 @@ venv/
 # Docker secrets (e.g. the master passphrase file)
 secrets/
 
+# Local compose overrides (e.g. enabling the SoftHSM backend)
+docker-compose.override.yml
+
 # Database
 data/
 

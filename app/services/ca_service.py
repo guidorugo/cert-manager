@@ -499,10 +499,20 @@ def import_ca(name, cert_pem, key_pem, passphrase, parent_id=None, key_passphras
     return ca
 
 
+def _refuse_if_not_exportable(ca, cert_only_msg):
+    """Raise if the CA key cannot be exported: HSM keys are non-extractable,
+    certificate-only imports have no key. Software-keyed CAs pass through."""
+    if ca.is_exportable:
+        return
+    if ca.key_backend == "softhsm":
+        raise ValueError("This CA's key is held in the HSM token and cannot be exported.")
+    raise ValueError(cert_only_msg)
+
+
 def export_ca_key_pem(ca, passphrase):
     """Decrypt and return the CA's private key as unencrypted PKCS#8 PEM."""
-    if not ca.private_key_enc:
-        raise ValueError("This CA was imported without its private key; there is no key to export.")
+    _refuse_if_not_exportable(
+        ca, "This CA was imported without its private key; there is no key to export.")
     key = decrypt_private_key(ca.private_key_enc, passphrase)
     return key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -519,8 +529,8 @@ def export_ca_pkcs12(ca, passphrase, export_password):
     """
     from cryptography.hazmat.primitives.serialization import BestAvailableEncryption, pkcs12
 
-    if not ca.private_key_enc:
-        raise ValueError("This CA was imported without its private key; PKCS#12 export is not possible.")
+    _refuse_if_not_exportable(
+        ca, "This CA was imported without its private key; PKCS#12 export is not possible.")
     if not export_password:
         raise ValueError("An export password is required for PKCS#12.")
 

@@ -25,7 +25,7 @@ from cryptography.x509.oid import NameOID
 
 from app.services import ca_service, cert_service, crl_service, ocsp_service
 from app.services.crypto_utils import decrypt_private_key
-from app.services.keybackend import get_backend, pkcs11_session
+from app.services.keybackend import get_backend, pkcs11_session, hsm_available
 from app.services.keybackend.softhsm import Pkcs11Backend
 from app.services.keybackend.base import OcspResponseSpec
 
@@ -310,3 +310,62 @@ def test_hsm_root_signs_software_intermediate(app, db, hsm_config):
         root_cert = x509.load_pem_x509_certificate(root.certificate_pem.encode())
         inter_cert = x509.load_pem_x509_certificate(inter.certificate_pem.encode())
         inter_cert.verify_directly_issued_by(root_cert)
+
+
+# --- Phase 4: availability, export refusal, migration CLI, route ------------
+
+def test_hsm_available(app, db, hsm_config):
+    with app.app_context():
+        assert hsm_available() is True
+
+
+def test_export_refused_for_hsm_ca(app, db, hsm_config):
+    with app.app_context():
+        app.config["KEY_BACKEND"] = "softhsm"
+        ca = ca_service.create_root_ca(
+            name="NoExport HSM", subject_attrs={"CN": "NoExport HSM"},
+            key_type="RSA", key_size=2048, validity_days=3650, passphrase=PASSPHRASE)
+        assert ca.is_exportable is False
+        with pytest.raises(ValueError, match="held in the HSM"):
+            ca_service.export_ca_key_pem(ca, PASSPHRASE)
+        with pytest.raises(ValueError, match="held in the HSM"):
+            ca_service.export_ca_pkcs12(ca, PASSPHRASE, "p12pass")
+
+
+def test_migrate_to_hsm_cli(app, db, hsm_config):
+    with app.app_context():
+        ca = ca_service.create_root_ca(
+            name="Migrate Me", subject_attrs={"CN": "Migrate Me"},
+            key_type="RSA", key_size=2048, validity_days=3650,
+            passphrase=PASSPHRASE, backend="software")
+        assert ca.key_backend == "software" and ca.private_key_enc != b""
+        ca_id = ca.id
+
+        result = app.test_cli_runner().invoke(args=["keys", "migrate-to-hsm", "--yes"])
+        assert result.exit_code == 0, result.output
+
+        migrated = db.session.get(ca_service.CertificateAuthority, ca_id)
+        assert migrated.key_backend == "softhsm"
+        assert migrated.private_key_enc == b"" and migrated.key_label
+        # still fully functional after migration: issues a verifiable leaf
+        cert = cert_service.create_certificate(
+            migrated, {"CN": "post-migrate"}, [], 90, PASSPHRASE,
+            key_type="RSA", key_size=2048)
+        ca_cert = x509.load_pem_x509_certificate(migrated.certificate_pem.encode())
+        x509.load_pem_x509_certificate(cert.certificate_pem.encode()).verify_directly_issued_by(ca_cert)
+        # and export is now refused
+        assert migrated.is_exportable is False
+
+
+def test_create_ca_route_selects_hsm_backend(client, admin_user, app, db, hsm_config):
+    client.post("/auth/login", data={"username": "testadmin", "password": "adminpass"})
+    resp = client.post("/ca/create", data={
+        "mode": "generate", "name": "UI HSM Root", "cn": "UI HSM Root",
+        "key_type": "RSA", "key_size": "2048", "validity_days": "3650",
+        "ca_type": "root", "key_backend": "softhsm",
+    }, follow_redirects=False)
+    assert resp.status_code in (302, 303)
+    with app.app_context():
+        ca = ca_service.CertificateAuthority.query.filter_by(name="UI HSM Root").first()
+        assert ca is not None and ca.key_backend == "softhsm"
+        assert ca.private_key_enc == b"" and ca.has_signing_key

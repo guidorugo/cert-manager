@@ -18,6 +18,7 @@ A web-based X.509 Certificate Authority management application built with Python
 - **HTTP Basic Auth**: Stateless API access via `curl -u user:pass` for scripts and automation, alongside session-based browser auth
 - **Dark Theme**: Light/dark mode toggle with OS-preference default and per-browser persistence
 - **Security**: Private keys encrypted at rest with Fernet (PBKDF2-derived key, 600k iterations), session hardening, insecure-default rejection
+- **Hardware-backed keys (SoftHSM/PKCS#11)**: Optionally hold CA signing keys in a PKCS#11 token so they never enter application memory and cannot be exported — selectable per-CA, with a one-way migration for existing CAs and a drop-in path to a real hardware HSM
 - **LDAP Login**: Optional LDAP/Active Directory authentication with group-to-role mapping and automatic user provisioning
 
 ## Quick Start
@@ -99,6 +100,44 @@ openssl ocsp \
   -url http://localhost:5000/public/ocsp/1 \
   -resp_text
 ```
+
+## Hardware-Backed Keys (SoftHSM / PKCS#11)
+
+By default CA private keys are Fernet-encrypted files. Optionally, keys can live
+in a **PKCS#11 token (SoftHSM)** so they never enter application memory and are
+**non-exportable** — the strongest protection for a trust anchor, and the same
+code path works with a real hardware HSM later.
+
+The Docker image already bundles `softhsm2`. To enable it, create the two PIN
+secret files and give the app the PKCS#11 settings (a `docker-compose.override.yml`
+keeps this local — see the commented block in `docker-compose.yml`):
+
+```bash
+printf '1234'     > secrets/pkcs11_user_pin && chmod 600 secrets/pkcs11_user_pin
+printf '12345678' > secrets/pkcs11_so_pin   && chmod 600 secrets/pkcs11_so_pin
+```
+
+Then set on the app service: `SOFTHSM2_CONF=/app/data/softhsm/softhsm2.conf`,
+`PKCS11_MODULE=/usr/lib/softhsm/libsofthsm2.so`, `PKCS11_TOKEN_LABEL=cert-manager`,
+`PKCS11_USER_PIN_FILE=/run/secrets/pkcs11_user_pin`,
+`PKCS11_SO_PIN_FILE=/run/secrets/pkcs11_so_pin`, and list both PIN secrets under
+`secrets:`. The entrypoint initialises the token on first boot.
+
+- **Per-CA choice**: with the token configured, the *Create CA* form shows a
+  **Key Protection** selector (Software vs HSM). Leave `KEY_BACKEND=software`
+  (default) to keep new CAs software-backed while still offering HSM per-CA, or
+  set `KEY_BACKEND=softhsm` to make new CAs HSM-backed by default.
+- **The CA detail page** shows the **Key Protection** row (Software / HSM) and
+  hides the key/PKCS#12 export for HSM CAs (they cannot be exported).
+- **Migrate existing CAs** into the token (one-way — back up any key you might
+  need to export first; import a CA in software then migrate if you want it in
+  the HSM):
+
+  ```bash
+  docker compose exec app flask keys migrate-to-hsm --dry-run   # preview
+  docker compose exec app flask keys migrate-to-hsm             # migrate all
+  docker compose exec app flask keys migrate-to-hsm --ca-id 3   # just one
+  ```
 
 ## API Reference
 

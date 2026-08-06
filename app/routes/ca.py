@@ -7,6 +7,7 @@ from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..services import ca_service, crl_service, audit_service
+from ..services.keybackend import hsm_available
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ def _create_page_context():
     return {
         "signing_cas": CertificateAuthority.signing_capable().all(),
         "link_cas": CertificateAuthority.query.filter_by(is_revoked=False).all(),
+        "hsm_available": hsm_available(),
     }
 
 
@@ -134,6 +136,12 @@ def create():
             ca_type = request.form.get("ca_type", "root")
             parent_id = request.form.get("parent_id")
             path_length_str = request.form.get("path_length", "").strip()
+            key_backend = request.form.get("key_backend", "software")
+            if key_backend not in ("software", "softhsm"):
+                key_backend = "software"
+            if key_backend == "softhsm" and not hsm_available():
+                flash("The HSM (SoftHSM) key backend is not configured on this server.", "danger")
+                return render_template("ca/create.html", **_create_page_context())
 
             try:
                 key_size = int(request.form.get("key_size", "2048"))
@@ -167,11 +175,13 @@ def create():
                     ca = ca_service.create_intermediate_ca(
                         name, parent_ca, subject_attrs, key_type, key_size,
                         validity_days, passphrase, path_length=path_length,
+                        backend=key_backend,
                     )
                 else:
                     ca = ca_service.create_root_ca(
                         name, subject_attrs, key_type, key_size,
                         validity_days, passphrase, path_length=path_length,
+                        backend=key_backend,
                     )
                 audit_service.log_action("create_ca", target_type="ca", target_id=ca.id)
                 db.session.commit()
