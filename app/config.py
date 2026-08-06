@@ -58,6 +58,14 @@ class Config:
     # today's behaviour) or "softhsm" (key held in a PKCS#11 token). Existing CAs
     # keep whatever backend they were created with, per-CA.
     KEY_BACKEND = os.environ.get("KEY_BACKEND", "software")
+    # PKCS#11 / SoftHSM settings (only used when a CA is HSM-backed). The user
+    # PIN is a secret and follows the _FILE convention like MASTER_PASSPHRASE.
+    PKCS11_MODULE = os.environ.get(
+        "PKCS11_MODULE", "/usr/lib/softhsm/libsofthsm2.so"
+    )
+    PKCS11_TOKEN_LABEL = os.environ.get("PKCS11_TOKEN_LABEL", "cert-manager")
+    PKCS11_USER_PIN = _read_secret("PKCS11_USER_PIN", None)
+    PKCS11_SO_PIN = _read_secret("PKCS11_SO_PIN", None)
 
     OCSP_URL_SCHEME = os.environ.get("OCSP_URL_SCHEME", "http")
     PERMANENT_SESSION_LIFETIME = timedelta(
