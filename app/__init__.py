@@ -300,6 +300,15 @@ def _migrate_schema():
             db.session.execute(text(
                 "ALTER TABLE certificate_authorities ADD COLUMN revocation_reason VARCHAR(50)"
             ))
+        # A1 key-backend columns (existing CAs are software-backed)
+        if "key_backend" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN key_backend VARCHAR(20) NOT NULL DEFAULT 'software'"
+            ))
+        if "key_label" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE certificate_authorities ADD COLUMN key_label VARCHAR(200)"
+            ))
 
     # Migrate certificates table
     if "certificates" in inspector.get_table_names():

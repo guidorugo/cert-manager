@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import CRLEntryExtensionOID
 
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.certificate import Certificate
-from .crypto_utils import decrypt_private_key
+from .keybackend import backend_for_ca
 
 
 REVOCATION_REASONS = {
@@ -28,7 +28,7 @@ def refresh_crl(ca, passphrase):
 
     No-op (returns None) for certificate-only CAs, which cannot sign a CRL.
     """
-    if not ca or not ca.private_key_enc:
+    if not ca or not ca.has_signing_key:
         return None
     return generate_crl(ca, passphrase)
 
@@ -99,10 +99,9 @@ def revoke_ca(ca_id, reason="unspecified", passphrase=None):
 
 
 def generate_crl(ca, passphrase, validity_days=7):
-    if not ca.private_key_enc:
+    if not ca.has_signing_key:
         raise ValueError("This CA was imported without its private key and cannot sign CRLs.")
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
-    ca_key = decrypt_private_key(ca.private_key_enc, passphrase)
 
     now = datetime.now(timezone.utc)
     ca.crl_number += 1
@@ -151,7 +150,8 @@ def generate_crl(ca, passphrase, validity_days=7):
 
         builder = builder.add_revoked_certificate(revoked_builder.build())
 
-    crl = builder.sign(ca_key, hashes.SHA256())
+    crl_der = backend_for_ca(ca).sign_crl(builder, ca, secret=passphrase)
+    crl = x509.load_der_x509_crl(crl_der)
 
     # Cache the CRL on the CA for public download
     ca.crl_pem = crl.public_bytes(serialization.Encoding.PEM).decode()
