@@ -100,14 +100,14 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | G1 | Medium | Carried | Audit log not tamper-evident; no anomaly alerting | Logging |
 | G2 | Low | ✅ **Resolved** | `remote_addr` without `ProxyFix` — wrong client IP in logs/limits | Logging |
 | H1 | Medium | Carried | Container runs as root; no hardening in compose | Container |
-| H2 | Low-Med | Carried | Base image pinned by mutable tag; no image vuln scan | Container |
-| I1 | Medium | Carried | No dependency hash/lockfile integrity pinning (transitive deps float) | Supply chain |
-| I2 | Low-Med | Carried | No SCA/vulnerability scanning in CI | Supply chain |
+| H2 | Low-Med | ✅ **Resolved** | Base image **digest-pinned**; **Trivy** image scan added; Dependabot bumps | Container |
+| I1 | Medium | ✅ **Resolved** | Deps **hash-locked** (`requirements.in` → hashed `requirements.txt`, `--require-hashes`) | Supply chain |
+| I2 | Low-Med | ✅ **Resolved** | **pip-audit** + **Trivy** in CI, with a weekly cron re-scan | Supply chain |
 | I3 | Low | **NEW** | `ldap3` is at latest (2.9.1) but the project is dormant (no release since 2021) | Supply chain |
-| J1 | Medium | Carried | CI actions pinned by mutable tags, not commit SHAs | CI/CD |
-| J2 | Medium | Carried | No image signing / provenance / SBOM | CI/CD |
+| J1 | Medium | ✅ **Resolved** | All CI actions **SHA-pinned**; Dependabot bumps | CI/CD |
+| J2 | Medium | ✅ **Resolved** | Release images **cosign-signed** + **SLSA provenance** + **SBOM** | CI/CD |
 
-Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A large batch was remediated in **v1.1.0**, and **A1 (Critical) in v2.0** via a SoftHSM/PKCS#11 key backend (see below); the headline residuals are now the rest of **A7** and the deployment items (E1 TLS, H1 container, CI supply-chain).
+Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A large batch was remediated in **v1.1.0**, and **A1 (Critical) in v2.0** via a SoftHSM/PKCS#11 key backend (see below); the headline residuals are now the rest of **A7** and the deployment items (E1 TLS, H1 container).
 
 **Remediated (2026-08-05):**
 - **Operational:** **A3** (Forgejo credential rotated + de-embedded), **A6** (`venv/` purged from history + tags).
@@ -115,7 +115,8 @@ Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A 
 - **v1.1.0 (security-hardening batch):** **B1** (CSR proof-of-possession enforced), **B2/B3** (revocation regenerates CRLs; revoked sub-CAs now appear in the parent CRL **and** OCSP), **B4** (validity capped and clamped to the CA's expiry), **B5** (minimum RSA 2048), **C1** (OCSP parses + looks up **before** decrypting, caches the CA key; public CRL is read-only), **C2** (`MAX_CONTENT_LENGTH`), **C3** (leaf key/PKCS#12 export POST-only), **C5** (open-redirect backslash), **D6** (LDAP admin-group-only no longer admits the whole directory), **E2** (CSP/HSTS/Referrer-Policy), **G2** (opt-in ProxyFix), **L1** (secure-cookie default). **A2** mitigated: `MASTER_PASSPHRASE` moved to a Docker secret (out of the process env) and the DB tightened to `600`. **A4** accepted (intentional example placeholder).
 - **v2.0 (SoftHSM/PKCS#11 key backend):** **A1** — CA signing keys can be held in a PKCS#11 token (SoftHSM), non-exportable and never resident in application memory; selectable per-CA (software backend remains default), with a one-way `flask keys migrate-to-hsm`. This also **mitigates F1** (HSM keys never enter process memory/swap/core) and the key-export limb of **A7** (HSM-backed CA keys cannot be exported).
 - **v2.0.1:** SoftHSM token-init made **idempotent** (a container restart no longer creates duplicate `cert-manager` tokens that broke HSM signing via `MultipleTokensReturned`); the stale world-readable `instance/` dev DB **git-removed and `instance/` gitignored** (closes the `instance/` limb of **A2**).
-- **Headline still-open:** the rest of **A7** for *software*-backed CAs (unencrypted key PEM **at rest**, dual control) — *transport is a deployment responsibility met by the required reverse proxy (see A7/E1)*; **E1** (the shipped compose still ships no TLS proxy); and the container/CI supply-chain items (H1/H2/I/J). *(A1 resolved in v2.0.)*
+- **CI supply-chain hardening:** **J1** (CI actions SHA-pinned), **H2** (base image digest-pinned + Trivy image scan), **I1** (deps hash-locked via `--require-hashes`), **I2** (pip-audit + Trivy with a weekly cron), **J2** (release images cosign-signed + SLSA provenance + SBOM); pins bumped by Dependabot.
+- **Headline still-open:** the rest of **A7** for *software*-backed CAs (unencrypted key PEM **at rest**, dual control) — *transport is a deployment responsibility met by the required reverse proxy (see A7/E1)*; **E1** (the shipped compose still ships no TLS proxy); and **H1** (container runs as root). *(A1 resolved in v2.0.)*
 
 ---
 
@@ -271,17 +272,17 @@ Decrypted keys and the passphrase are ordinary Python objects (immutable `bytes`
 ### [MEDIUM] H1 — Container runs as root; no hardening — *Carried*
 No `USER` in the Dockerfile (gunicorn runs as uid 0); compose has no `read_only`, `cap_drop`, `security_opt: no-new-privileges`, or `user:`. **Fix:** add a non-root `USER` (own `/app/data`), `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, read-only rootfs, resource limits, a healthcheck.
 
-### [LOW-MEDIUM] H2 — Base image pinned by mutable tag; no image scanning — *Carried*
+### [LOW-MEDIUM] H2 — Base image pinned by mutable tag; no image scanning — ✅ *Resolved (CI supply-chain hardening)*
 `FROM python:3.13-slim` (mutable tag); no Trivy/Grype scan. **Fix:** pin `python:3.13-slim@sha256:...` and update via Dependabot; add an image-vuln scan.
 
 ---
 
 ## I. Dependency & Supply Chain
 
-### [MEDIUM] I1 — No dependency integrity pinning — *Carried*
+### [MEDIUM] I1 — No dependency integrity pinning — ✅ *Resolved (CI supply-chain hardening)*
 Top-level versions use `==` (and are all current-latest — see Positives), but there are no artifact hashes and no lockfile; transitive deps float (`werkzeug`, `jinja2`, `pyasn1` via `ldap3`, etc.). **Fix:** generate a hashed lock (`pip-compile --generate-hashes` / `uv pip compile`) and build with `--require-hashes`.
 
-### [LOW-MEDIUM] I2 — No SCA/vulnerability scanning in CI — *Carried*
+### [LOW-MEDIUM] I2 — No SCA/vulnerability scanning in CI — ✅ *Resolved (CI supply-chain hardening)*
 The workflow builds/pushes with no `pip-audit`/OSV/Trivy gate. **Fix:** add `pip-audit`/OSV-Scanner + Trivy; fail on high/critical; schedule periodic re-scans.
 
 ### [LOW] I3 — `ldap3` is at latest but dormant (NEW)
@@ -291,10 +292,10 @@ The workflow builds/pushes with no `pip-audit`/OSV/Trivy gate. **Fix:** add `pip
 
 ## J. CI/CD Pipeline
 
-### [MEDIUM] J1 — GitHub Actions pinned by mutable tags — *Carried*
+### [MEDIUM] J1 — GitHub Actions pinned by mutable tags — ✅ *Resolved (CI supply-chain hardening)*
 `actions/checkout@v4`, `docker/*-action@v3/v5/v6` are mutable major tags on a job holding `packages: write`. A tag re-point can exfiltrate `GITHUB_TOKEN` or poison the published image. *(Permissions are correctly scoped `contents: read`/`packages: write`, and PR builds skip login/push — good.)* **Fix:** pin every action to a full commit SHA; update via Dependabot.
 
-### [MEDIUM] J2 — No image signing, provenance, or SBOM — *Carried*
+### [MEDIUM] J2 — No image signing, provenance, or SBOM — ✅ *Resolved (CI supply-chain hardening)*
 Published GHCR images are not cosign-signed, carry no SLSA provenance, and no SBOM. **Fix:** cosign keyless signing, `provenance: true` + `sbom: true` on build-push-action; document verification; avoid trusting mutable `:latest` in production.
 
 ---
