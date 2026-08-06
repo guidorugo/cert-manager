@@ -46,7 +46,7 @@ python -m pytest tests/ -v
 
 ## CI/CD
 - **GitHub Actions workflow**: `.github/workflows/docker-publish.yml`
-- **Triggers**: Push to `master` (builds + pushes `latest`), `v*` tags (pushes semver tags), PRs (build-only validation).
+- **Triggers**: PRs → tests only. Push to `master` → tests + image build for validation (**not published**). `v*` tags → tests + build + **publish** (semver tags + `latest`). Publishing is gated to release tags so a merge never auto-pushes an image.
 - **Registry**: `ghcr.io/guidorugo/cert-manager` — uses `GITHUB_TOKEN`, no extra secrets needed.
 - **`.dockerignore`**: Excludes `venv/`, `tests/`, `.env`, `.git/`, etc. from the Docker build context.
 
