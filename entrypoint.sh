@@ -26,7 +26,9 @@ if [ -n "${SOFTHSM2_CONF:-}" ] && command -v softhsm2-util >/dev/null 2>&1; then
     [ -n "${PKCS11_USER_PIN_FILE:-}" ] && [ -f "${PKCS11_USER_PIN_FILE}" ] && USER_PIN="$(cat "$PKCS11_USER_PIN_FILE")"
     SO_PIN="${PKCS11_SO_PIN:-}"
     [ -n "${PKCS11_SO_PIN_FILE:-}" ] && [ -f "${PKCS11_SO_PIN_FILE}" ] && SO_PIN="$(cat "$PKCS11_SO_PIN_FILE")"
-    if ! softhsm2-util --show-slots --module "$MODULE" 2>/dev/null | grep -q "Label:[[:space:]]*${LABEL}$"; then
+    # Match the label allowing softhsm2-util's trailing padding spaces (a bare
+    # "...${LABEL}$" fails to match and would re-init a duplicate token each boot).
+    if ! softhsm2-util --show-slots --module "$MODULE" 2>/dev/null | grep -qE "Label:[[:space:]]*${LABEL}[[:space:]]*$"; then
         if [ -n "$SO_PIN" ] && [ -n "$USER_PIN" ]; then
             echo "Initialising SoftHSM token '$LABEL'..."
             softhsm2-util --init-token --free --label "$LABEL" \
