@@ -16,21 +16,30 @@ Because RSA PKCS#1 v1.5 is deterministic, the DER produced here is
 byte-identical to what the software backend produced from the same key — the
 differential test in tests/test_softhsm.py asserts exactly that.
 
-Phase 2 implements leaf-certificate signing (RSA + EC), key generation, and key
-import. CRL and OCSP signing for HSM-backed CAs arrive in a later phase.
+Certificates and CRLs use the throwaway TBS-swap above. OCSP is different: pyca
+refuses to sign an OCSP response when the signing key differs from the responder
+certificate, so the response is assembled directly with asn1crypto. To reproduce
+pyca's exact CertID, the CertID is lifted from a throwaway pyca OCSP *request*
+rather than recomputed. Covers RSA + EC for certificates, CRLs, OCSP, and CA key
+generation/import.
 """
+from datetime import datetime, timezone
+
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.x509 import ocsp
 
-from asn1crypto import x509 as asn1_x509
+from asn1crypto import x509 as asn1_x509, crl as asn1_crl, ocsp as asn1_ocsp
+from asn1crypto import algos, core
 
 from .base import KeyBackend, OcspResponseSpec
 from . import pkcs11_session
 
 
-# NIST curve name (asn1crypto NamedCurve) by pyca key size.
+# NIST curve name (asn1crypto NamedCurve) and pyca curve class by key size.
 _EC_CURVE_NAME = {256: "secp256r1", 384: "secp384r1", 521: "secp521r1"}
+_EC_CURVE_BY_SIZE = {256: ec.SECP256R1, 384: ec.SECP384R1, 521: ec.SECP521R1}
 
 
 class Pkcs11Backend(KeyBackend):
@@ -38,12 +47,13 @@ class Pkcs11Backend(KeyBackend):
 
     # -- helpers -------------------------------------------------------------
     def _ca_key_info(self, ca):
-        """('RSA', None) or ('EC', curve) from the CA certificate's public key."""
-        pub = self.load_public_key(ca)
-        if isinstance(pub, rsa.RSAPublicKey):
+        """('RSA', None) or ('EC', curve) from the CA's key_type/key_size
+        columns — not the certificate, which does not yet exist while a root
+        CA is being self-signed."""
+        if ca.key_type == "RSA":
             return "RSA", None
-        if isinstance(pub, ec.EllipticCurvePublicKey):
-            return "EC", pub.curve
+        if ca.key_type == "EC":
+            return "EC", _EC_CURVE_BY_SIZE[ca.key_size]()
         raise ValueError("Unsupported CA key type for the HSM backend.")
 
     def _throwaway_key(self, ca):
@@ -80,21 +90,46 @@ class Pkcs11Backend(KeyBackend):
             raw = priv.sign(digest, mechanism=Mechanism.ECDSA)
             return encode_ecdsa_signature(raw)
 
-    def _swap_signature(self, throwaway_der, ca):
-        """Rebuild a Certificate from a throwaway-signed DER, replacing its
-        signature with the token's over the (unchanged) TBS bytes."""
-        asn1cert = asn1_x509.Certificate.load(throwaway_der)
-        tbs = asn1cert["tbs_certificate"]
+    def _reassemble(self, asn1_obj, tbs_field, sig_field, ca):
+        """Return DER of asn1_obj with its signature replaced by the token's,
+        computed over the (unchanged) TBS bytes. The TBS is signer-independent,
+        so this reproduces pyca's exact encoding."""
+        tbs = asn1_obj[tbs_field]
         signature = self._hsm_sign(tbs.dump(), ca)
-        signed = asn1_x509.Certificate({
-            "tbs_certificate": tbs,
-            "signature_algorithm": asn1cert["signature_algorithm"],
-            "signature_value": signature,
-        })
-        return signed.dump()
+        return asn1_obj.__class__({
+            tbs_field: tbs,
+            "signature_algorithm": asn1_obj["signature_algorithm"],
+            sig_field: signature,
+        }).dump()
+
+    def _sig_alg_name(self, ca):
+        key_type, _ = self._ca_key_info(ca)
+        return "sha256_rsa" if key_type == "RSA" else "sha256_ecdsa"
+
+    @staticmethod
+    def _gtime(dt):
+        """DER GeneralizedTime in UTC with whole-second precision (RFC 5280
+        profile: no fractional seconds, trailing 'Z'). pyca truncates the same
+        way, so this keeps output byte-compatible."""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return core.GeneralizedTime(dt.astimezone(timezone.utc).replace(microsecond=0))
+
+    def _ocsp_cert_status(self, spec):
+        status = spec.cert_status
+        if status == ocsp.OCSPCertStatus.GOOD:
+            return asn1_ocsp.CertStatus(name="good", value=core.Null())
+        if status == ocsp.OCSPCertStatus.REVOKED:
+            revoked = {"revocation_time": self._gtime(spec.revocation_time)}
+            if spec.revocation_reason is not None:
+                revoked["revocation_reason"] = spec.revocation_reason.name
+            return asn1_ocsp.CertStatus(
+                name="revoked", value=asn1_ocsp.RevokedInfo(revoked)
+            )
+        return asn1_ocsp.CertStatus(name="unknown", value=core.Null())
 
     # -- key lifecycle -------------------------------------------------------
-    def generate_ca_key(self, key_type, key_size, *, label):
+    def generate_ca_key(self, key_type, key_size, *, label, secret=None):
         from pkcs11 import KeyType, Attribute
         from pkcs11.util.ec import encode_named_curve_parameters
 
@@ -142,7 +177,7 @@ class Pkcs11Backend(KeyBackend):
                 pass
         return public_key, label
 
-    def import_ca_key(self, private_key, *, label):
+    def import_ca_key(self, private_key, *, label, secret=None):
         from pkcs11 import Attribute
         from pkcs11.util.rsa import decode_rsa_private_key
         from pkcs11.util.ec import decode_ec_private_key
@@ -175,20 +210,58 @@ class Pkcs11Backend(KeyBackend):
 
     # -- signing -------------------------------------------------------------
     def sign_certificate(self, builder, ca, *, secret=None) -> bytes:
-        throwaway_der = builder.sign(
-            self._throwaway_key(ca), hashes.SHA256()
-        ).public_bytes(serialization.Encoding.DER)
-        return self._swap_signature(throwaway_der, ca)
+        der = builder.sign(self._throwaway_key(ca), hashes.SHA256()).public_bytes(
+            serialization.Encoding.DER)
+        return self._reassemble(
+            asn1_x509.Certificate.load(der), "tbs_certificate", "signature_value", ca)
 
     def sign_crl(self, builder, ca, *, secret=None) -> bytes:
-        raise NotImplementedError(
-            "CRL signing for HSM-backed CAs is not yet supported (arrives in a later phase)."
-        )
+        der = builder.sign(self._throwaway_key(ca), hashes.SHA256()).public_bytes(
+            serialization.Encoding.DER)
+        return self._reassemble(
+            asn1_crl.CertificateList.load(der), "tbs_cert_list", "signature", ca)
 
     def sign_ocsp(self, spec: OcspResponseSpec, ca, *, secret=None) -> bytes:
-        raise NotImplementedError(
-            "OCSP signing for HSM-backed CAs is not yet supported (arrives in a later phase)."
-        )
+        # pyca refuses to sign an OCSP response when the signing key differs from
+        # the responder cert, so assemble it with asn1crypto. To reproduce pyca's
+        # exact CertID (issuer name/key hashes, request-mirrored hash algorithm),
+        # lift it from a throwaway pyca OCSP *request* rather than recomputing.
+        issuer = x509.load_der_x509_certificate(spec.issuer_cert_der)
+        subject = x509.load_der_x509_certificate(spec.subject_cert_der)
+        req = ocsp.OCSPRequestBuilder().add_certificate(
+            subject, issuer, spec.algorithm).build()
+        cert_id = asn1_ocsp.OCSPRequest.load(
+            req.public_bytes(serialization.Encoding.DER)
+        )["tbs_request"]["request_list"][0]["req_cert"]
+
+        responder_key_hash = x509.SubjectKeyIdentifier.from_public_key(
+            issuer.public_key()).digest
+
+        response_data = asn1_ocsp.ResponseData({
+            "responder_id": asn1_ocsp.ResponderId(
+                name="by_key", value=responder_key_hash),
+            "produced_at": self._gtime(datetime.now(timezone.utc)),
+            "responses": [asn1_ocsp.SingleResponse({
+                "cert_id": cert_id,
+                "cert_status": self._ocsp_cert_status(spec),
+                "this_update": self._gtime(spec.this_update),
+                "next_update": self._gtime(spec.next_update),
+            })],
+        })
+        signature = self._hsm_sign(response_data.dump(), ca)
+        basic = asn1_ocsp.BasicOCSPResponse({
+            "tbs_response_data": response_data,
+            "signature_algorithm": algos.SignedDigestAlgorithm(
+                {"algorithm": self._sig_alg_name(ca)}),
+            "signature": signature,
+        })
+        return asn1_ocsp.OCSPResponse({
+            "response_status": "successful",
+            "response_bytes": asn1_ocsp.ResponseBytes({
+                "response_type": "basic_ocsp_response",
+                "response": basic,
+            }),
+        }).dump()
 
     # -- capabilities --------------------------------------------------------
     def can_export(self) -> bool:

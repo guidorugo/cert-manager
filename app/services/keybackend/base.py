@@ -46,13 +46,14 @@ class KeyBackend(ABC):
 
     # -- key lifecycle -------------------------------------------------------
     @abstractmethod
-    def generate_ca_key(self, key_type: str, key_size: int, *, label: str):
+    def generate_ca_key(self, key_type: str, key_size: int, *, label: str, secret=None):
         """Create a CA key. Returns (public_key, key_ref) where key_ref is the
         opaque reference stored on the CA (encrypted bytes for software, a
-        token label for HSM). The private key must never be returned."""
+        token label for HSM). The private key must never be returned. `secret`
+        is the encryption passphrase for the software backend; HSM ignores it."""
 
     @abstractmethod
-    def import_ca_key(self, private_key, *, label: str):
+    def import_ca_key(self, private_key, *, label: str, secret=None):
         """Store an externally-provided private key. Returns key_ref."""
 
     @abstractmethod
