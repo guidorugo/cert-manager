@@ -23,6 +23,7 @@ This project and this assessment were produced with AI assistance from Anthropic
 | Original project build & first assessment | Claude Opus 4.8 | `claude-opus-4-8` | Jul 2026 (first assessment 2026-07-10). *Commit co-author trailers referenced "Claude Opus 4.6"; the transcript `model` field records `claude-opus-4-8` as the serving model.* |
 | Today's feature development (LDAP auth, CA import/export, dark theme, dependency upgrade) | Claude Fable 5 | `claude-fable-5` | 2026-08-05, "max" effort |
 | **This re-assessment** | Claude Fable 5 | `claude-fable-5` | 2026-08-05, "max" effort, with **4 parallel review sub-agents on Claude Opus 4.8** (`claude-opus-4-8`) |
+| **Post-assessment remediation** (v2.0 SoftHSM/PKCS#11 key backend, A3 git-history purge, CI/supply-chain hardening, auth & runtime hardening, image-signing fixes) | Claude Opus 4.8 | `claude-opus-4-8` | 2026-08-05 → 2026-08-07, "max" effort |
 
 **Token usage & cost (actual).** Pricing per 1M tokens — input / output / cache-write (5-min TTL, 1.25×) / cache-read (0.1×): `claude-fable-5` = \$10 / \$50 / \$12.50 / \$1.00 · `claude-opus-4-8` = \$5 / \$25 / \$6.25 / \$0.50.
 
@@ -31,10 +32,12 @@ This project and this assessment were produced with AI assistance from Anthropic
 | Original build + 1st assessment (Jul) | Opus 4.8 | 81,762 | 487,596 | 2,073,419 | 11,031,909 | **\$31.07** |
 | Today: features + this assessment (Aug 5) | Fable 5 | 108,490 | 2,565,631 | 6,904,718 | 210,326,151 | **\$426.00** |
 | Today: review sub-agents | Opus 4.8 | 30,042 | 6,930 | 55,248 | 112,254 | **\$0.72** |
-| **Grand total (all Claude work on this repo)** | — | — | — | — | — | **≈ \$457.80** |
+| Remediation batch: v2.0 HSM backend + hardening + signing (Aug 5–7) | Opus 4.8 | 218,556 | 3,429,583 | 20,839,639 | 1,049,846,321 | **\$742.00** |
+| **Grand total (all Claude work on this repo)** | — | — | — | — | — | **≈ \$1,199.80** |
 
-- **≈ 234 million billable tokens** total; the dominant line is cache-read (≈ 221M tokens). A long single "max"-effort session re-reads its large cached context each turn, billed at the 0.1× cache-read rate — for Fable 5 that alone is ≈ \$210 of the \$426.
+- **≈ 1.31 billion billable tokens** total; the dominant line is cache-read (≈ 1.27 billion tokens). A long, high-effort session re-reads its large cached context each turn, billed at the 0.1× cache-read rate — for Fable 5 that alone is ≈ \$210 of the Aug-5 \$426, and for the Aug 5–7 Opus remediation batch it is ≈ \$525 of the \$742.
 - Today's \$426 covers **all** of the day's work (removing the Claude co-author trailer, dark theme, dependency upgrade, LDAP Phases 1–2, CA import overhaul, CA export, live testing, **and** this assessment). The assessment is the tail of that shared session and is not separately isolable.
+- The **\$742 remediation batch** (Aug 5–7, one continuous Opus 4.8 session) covers the v2.0 SoftHSM/PKCS#11 key backend (A1), the A3 git-history purge, the CI/supply-chain hardening (SHA-pinned actions, hash-locked deps, SLSA provenance + SBOM, cosign signing, Trivy — H2/I1/I2/J1/J2), the auth/runtime hardening batch (non-root container H1, login lockout D1, LDAP-TLS guardrail, reverse-proxy TLS example E1, F2/E3/D2/D5/F3/C4), and the image-signing/verification fixes. The figure is the Opus main-loop total; Aug-5 Opus sub-agents add ≈ \$20 and overlap the \$0.72 line above.
 - Figures are provider-list-price **estimates** for the assistance tokens; they are **not a bill** and exclude any subscription, tooling, or human-review time.
 
 > **AI-assistance disclosure caveat.** Because both the code and its review were produced by the same model family, this assessment is **not an independent third-party audit.** For a trust-critical CA, an independent human security review and a formal audit (WebTrust/ETSI-style) remain necessary before production trust is placed in this CA.
