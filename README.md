@@ -64,8 +64,9 @@ cosign verify ghcr.io/guidorugo/cert-manager:2.1.1 \
   --certificate-identity-regexp 'https://github.com/guidorugo/cert-manager/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-# Inspect the SLSA provenance / SBOM attestations
-cosign download attestation ghcr.io/guidorugo/cert-manager:2.1.1 | jq .
+# Inspect the SLSA provenance / SBOM (BuildKit in-toto attestations in the index)
+docker buildx imagetools inspect ghcr.io/guidorugo/cert-manager:2.1.1 --format '{{ json .Provenance }}'
+docker buildx imagetools inspect ghcr.io/guidorugo/cert-manager:2.1.1 --format '{{ json .SBOM }}'
 ```
 
 ### Local Development
