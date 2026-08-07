@@ -12,7 +12,8 @@ venv/
 # Docker secrets (e.g. the master passphrase file)
 secrets/
 
-# Local compose overrides (e.g. enabling the SoftHSM backend)
+# Local compose overrides (site-specific tweaks). SoftHSM is enabled by default
+# in docker-compose.yml, so no override is needed just to turn it on.
 docker-compose.override.yml
 
 # Database

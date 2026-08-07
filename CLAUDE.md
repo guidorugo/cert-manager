@@ -22,9 +22,10 @@ Handles CA creation, certificate signing/revocation, CSR management, CRL generat
 
 ### Docker (production)
 ```bash
+./scripts/init-secrets.sh   # generates secrets/master_passphrase, .env (SECRET_KEY, ADMIN_PASSWORD), SoftHSM PINs
 docker compose up --build
 ```
-Requires `SECRET_KEY` and `MASTER_PASSPHRASE` env vars to be set (docker compose will fail otherwise).
+A fresh clone must run `scripts/init-secrets.sh` first — the compose bind-mounts `secrets/master_passphrase` (gitignored) and the app refuses to start with placeholder `SECRET_KEY`/`ADMIN_PASSWORD`. The script is idempotent.
 
 ### Pre-built image (GHCR)
 ```bash
@@ -54,12 +55,13 @@ python -m pytest tests/ -v
 
 ## Key Design Decisions
 - **Private key encryption**: Fernet + PBKDF2-HMAC-SHA256 (600k iterations). Salt stored with ciphertext.
-- **Key backends (A1, SoftHSM/PKCS#11)**: A CA's signing key lives behind a `KeyBackend` (`app/services/keybackend/`). Default `software` = today's Fernet-encrypted key; opt-in `softhsm` = key held in a PKCS#11 token, never in Python memory. Selected per-CA (`CertificateAuthority.key_backend`/`key_label` columns); `KEY_BACKEND` sets the default for new CAs, and the create form offers HSM per-CA when `hsm_available()`. Three-state model guards: `has_signing_key` (issue/CRL/OCSP/sub-CA — true for software+HSM), `is_exportable` (key/PKCS#12 export — software only), `signing_capable()` query. pyca can't sign with a PKCS#11 key, so the HSM backend builds the TBS with a same-algorithm throwaway key and swaps in the token's signature via `asn1crypto` (cert/CRL are byte-identical to software for RSA; OCSP is assembled directly since pyca refuses signer≠responder, reusing a throwaway pyca request's CertID). RSA uses `CKM_SHA256_RSA_PKCS`; EC signs the SHA-256 digest with raw `CKM_ECDSA` (SoftHSM lacks `CKM_ECDSA_SHA256`). Cross-backend intermediates work (parent's backend signs the child). Migrate existing keys one-way with `flask keys migrate-to-hsm`; HSM keys are `CKA_EXTRACTABLE=false` so export is refused. Deployment stays single-container (softhsm2 in the image; entrypoint inits the token when `SOFTHSM2_CONF` is set). Differential tests in `tests/test_softhsm.py` gate byte-parity (skip cleanly without SoftHSM; CI installs it).
+- **Key backends (A1, SoftHSM/PKCS#11)**: A CA's signing key lives behind a `KeyBackend` (`app/services/keybackend/`). Default `software` = today's Fernet-encrypted key; opt-in `softhsm` = key held in a PKCS#11 token, never in Python memory. Selected per-CA (`CertificateAuthority.key_backend`/`key_label` columns); `KEY_BACKEND` sets the default for new CAs, and the create form offers HSM per-CA when `hsm_available()`. Three-state model guards: `has_signing_key` (issue/CRL/OCSP/sub-CA — true for software+HSM), `is_exportable` (key/PKCS#12 export — software only), `signing_capable()` query. pyca can't sign with a PKCS#11 key, so the HSM backend builds the TBS with a same-algorithm throwaway key and swaps in the token's signature via `asn1crypto` (cert/CRL are byte-identical to software for RSA; OCSP is assembled directly since pyca refuses signer≠responder, reusing a throwaway pyca request's CertID). RSA uses `CKM_SHA256_RSA_PKCS`; EC signs the SHA-256 digest with raw `CKM_ECDSA` (SoftHSM lacks `CKM_ECDSA_SHA256`). Cross-backend intermediates work (parent's backend signs the child). Migrate existing keys one-way with `flask keys migrate-to-hsm`; HSM keys are `CKA_EXTRACTABLE=false` so export is refused. **SoftHSM is enabled by default (v2.3.0)**: `docker-compose.yml` wires the PKCS#11 config + the two PIN secrets, `scripts/init-secrets.sh` generates the PINs, and the entrypoint inits the token on first boot — so HSM is offered per-CA out of the box (`KEY_BACKEND` still defaults to `software`, so new CAs stay exportable unless set to `softhsm`). A local `docker-compose.override.yml` is therefore no longer needed. Deployment stays single-container (softhsm2 in the image). Differential tests in `tests/test_softhsm.py` gate byte-parity (skip cleanly without SoftHSM; CI installs it).
 - **Master passphrase**: From `MASTER_PASSPHRASE` env var. Used for all key encrypt/decrypt.
 - **OCSP**: Built-in responder at `/public/ocsp/<ca_id>`. Certificates include AIA extension.
 - **CRL Distribution Points**: Auto-populated in certificates using `{scheme}://{server}/public/crl/{ca_id}.crl`. Added via `crl_dp_url` parameter in `cert_service.create_certificate()` and `cert_service.sign_csr()`. The CRL DP field in the create/sign forms is **editable** — users can override the auto-generated URL per-certificate. When `SERVER_NAME_FOR_OCSP` is at its default `localhost:5000`, the hostname is **auto-detected from `request.host`**. A warning banner appears in Advanced Settings when the detected hostname contains `localhost`.
 - **Certificate profiles**: Both certificate creation and CSR signing forms have a collapsible Advanced Settings section with profile presets (Web Server, Client Auth, Email/S-MIME, Code Signing, Custom) that configure Key Usage and Extended Key Usage checkboxes. Default profile (Web Server) matches previous hardcoded defaults for backward compatibility.
 - **Dark theme**: Bootstrap 5.3 `data-bs-theme`-based. An inline head script applies the saved theme (`localStorage` key `theme`) or the OS `prefers-color-scheme` before first paint; `.theme-toggle` buttons (navbar when logged in, floating top-right otherwise) switch and persist it. Use adaptive utility classes (`bg-body-tertiary`, `text-body-secondary`) in templates — never light-only ones like `bg-light`/`text-muted`.
+- **Version & update check**: `app/_version.py` `__version__` is the single source of truth (bump on release; `APP_VERSION` env overrides the displayed value). A context processor renders it as footer small-print. An **opt-in** update check (`UPDATE_CHECK_ENABLED`, `app/services/update_service.py`) fetches the latest GitHub release **server-side, cached (`UPDATE_CHECK_INTERVAL_SECONDS`, default 6h), non-blocking (background refresh), fail-silent**, and shows a footer "Update available" badge when behind — no client-side fetch, so no CSP change.
 - **Public endpoints**: CRL download and CA cert download require no auth.
 - **Database**: SQLite, stored in `./data/` (Docker volume).
 - **LDAP login (Phase 1)**: Optional LDAP auth for the session login via `auth_service.authenticate()` — local accounts first (break-glass admin works with LDAP down), then LDAP when `LDAP_ENABLED=true`. Two modes (exactly one must be configured): direct bind (`LDAP_USER_DN_TEMPLATE`) or search+bind (`LDAP_BIND_DN` + `LDAP_USER_SEARCH_BASE`). Group DNs map to roles (`LDAP_ADMIN_GROUP_DN` → admin, `LDAP_REQUESTER_GROUP_DN` → csr_requester; the requester group is a required-membership gate when set). LDAP users are auto-provisioned with `auth_source='ldap'` and the unusable-password sentinel (`!`), role re-synced each login, local deactivation wins. Empty passwords rejected before bind (anonymous-bind pitfall); filter/DN inputs escaped. Basic Auth works for LDAP users too via `auth_service.authenticate_basic()` with a per-process HMAC credential cache (`BASIC_AUTH_CACHE_TTL_SECONDS`, default 60s, 0 disables); cache hits skip the bind but re-read the User row so deactivation applies immediately; directory outage → HTTP 503 for LDAP-backed Basic Auth.
@@ -81,7 +83,8 @@ python -m pytest tests/ -v
 - Audit log viewable at `/users/audit-log` (admin only, paginated).
 
 ## Security Hardening
-- **Insecure default rejection**: App refuses to start in non-debug, non-testing mode if `SECRET_KEY`, `MASTER_PASSPHRASE`, or `ADMIN_PASSWORD` are set to their insecure defaults (`sys.exit(1)`).
+- **Insecure default rejection**: App refuses to start in non-debug, non-testing mode if `SECRET_KEY` or `MASTER_PASSPHRASE` are set to their insecure defaults (`sys.exit(1)`). `ADMIN_PASSWORD` is checked the same way **only in `_create_default_admin`, when it would actually seed the first admin** — so once an admin exists it is unused and can be removed from `.env`.
+- **Forced first-login password change**: `_create_default_admin` sets `User.must_change_password` on the seeded admin; a `before_request` guard (in `app/__init__.py`) redirects a flagged **session** user to `/auth/change-password` until they rotate it (Basic Auth + public endpoints exempt; logout reachable). Existing users default to `False`, so upgrades don't force anyone. Self-service change-password (`MIN_PASSWORD_LENGTH`, default 12) is available to any local user via a navbar link.
 - **Session cookies**: HttpOnly, SameSite=Lax. `SESSION_COOKIE_SECURE` configurable (default: false, set to true in production).
 - **Session timeout**: Configurable via `SESSION_LIFETIME_MINUTES` (default 30).
 - **Security headers**: `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY` on all responses.
@@ -108,7 +111,8 @@ python -m pytest tests/ -v
 - `SECRET_KEY` - Flask secret key
 - `MASTER_PASSPHRASE` - Master passphrase for key encryption
 - `DATABASE_URL` - SQLAlchemy database URI
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD` - Default admin credentials
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` - Seed the **first** admin only (when no users exist); a change is forced on first login, after which `ADMIN_PASSWORD` is unused and removable from `.env`
+- `MIN_PASSWORD_LENGTH` - Minimum length for a new password on the change-password page (default: 12)
 - `SERVER_NAME_FOR_OCSP` - Hostname for OCSP/CRL URLs (default: localhost:5000). When at default, auto-detected from `request.host`
 - `SESSION_LIFETIME_MINUTES` - Session timeout in minutes (default: 30)
 - `RATE_LIMIT_ENABLED` - Enable rate limiting (default: false, requires Flask-Limiter)
@@ -123,7 +127,9 @@ python -m pytest tests/ -v
 - `MAX_CERT_VALIDITY_DAYS` / `MAX_CA_VALIDITY_DAYS` - Issuance validity caps (default: 825 / 7305); certs are also clamped to the issuing CA's expiry
 - `MIN_RSA_KEY_SIZE` - Minimum RSA key size accepted (default: 2048)
 - `OCSP_KEY_CACHE_TTL_SECONDS` - In-memory TTL for the decrypted CA signing key used by OCSP (default: 300, 0 disables)
-- `KEY_BACKEND` - Default signing-key backend for new CAs: `software` (default) or `softhsm`
+- `UPDATE_CHECK_ENABLED` - Footer "Update available" badge vs the latest GitHub release (default: false; opt-in outbound call)
+- `UPDATE_CHECK_REPO` / `UPDATE_CHECK_INTERVAL_SECONDS` - Repo to check (default `guidorugo/cert-manager`) and cache TTL (default 21600 = 6h)
+- `KEY_BACKEND` - Default signing-key backend for new CAs: `software` (default) or `softhsm`. SoftHSM is wired up by default in `docker-compose.yml`, so HSM is offered per-CA even while new CAs stay `software`
 - `PKCS11_MODULE` - PKCS#11 library path (default: `/usr/lib/softhsm/libsofthsm2.so`)
 - `PKCS11_TOKEN_LABEL` - Token label (default: `cert-manager`)
 - `PKCS11_USER_PIN` / `PKCS11_SO_PIN` - Token PINs (support the `_FILE` secret convention)
