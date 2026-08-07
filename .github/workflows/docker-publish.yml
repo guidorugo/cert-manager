@@ -114,12 +114,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        # --new-bundle-format=false stores the signature at the legacy
-        # `sha256-<digest>.sig` tag. cosign v3 otherwise defaults to the new
-        # Sigstore bundle via the OCI 1.1 Referrers API, which cosign <3.0
-        # cannot see ("no signatures found"). The legacy tag verifies with
-        # every cosign version while keeping keyless Fulcio + Rekor.
-        run: cosign sign --yes --new-bundle-format=false "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+        # Store the signature at the legacy `sha256-<digest>.sig` tag so every
+        # cosign version can verify it. cosign v3 otherwise defaults to the new
+        # Sigstore bundle via the OCI 1.1 Referrers API, invisible to cosign
+        # <3.0 ("no signatures found"). Both flags are required together:
+        # --use-signing-config defaults to true in cosign v3 and mandates the
+        # new bundle format, so it must be disabled alongside --new-bundle-format
+        # to fall back to the classic keyless Fulcio + Rekor flow.
+        run: cosign sign --yes --new-bundle-format=false --use-signing-config=false "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
 
       - name: Trivy image vulnerability scan (H2)
         if: startsWith(github.ref, 'refs/tags/v')
