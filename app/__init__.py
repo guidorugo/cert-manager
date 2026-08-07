@@ -32,6 +32,7 @@ def create_app(config_class=Config):
     _configure_session(app)
     _setup_security_headers(app)
     _setup_rate_limiting(app)
+    _register_template_context(app)
 
     from .routes.auth import auth_bp
     from .routes.dashboard import dashboard_bp
@@ -59,6 +60,21 @@ def create_app(config_class=Config):
         _create_default_admin(app)
 
     return app
+
+
+def _register_template_context(app):
+    """Expose the app version to every template (rendered as footer small-print).
+
+    Uses the APP_VERSION env override if set, else the baked-in __version__ so
+    the footer reflects exactly which build is running.
+    """
+    from ._version import __version__
+
+    app_version = os.environ.get("APP_VERSION") or __version__
+
+    @app.context_processor
+    def inject_app_version():
+        return {"app_version": app_version}
 
 
 def _setup_basic_auth(app):
