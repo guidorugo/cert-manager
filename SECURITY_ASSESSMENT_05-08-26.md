@@ -81,22 +81,22 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | C1 | **High** | ✅ **Resolved** | Unauthenticated OCSP forces CA-key decrypt (600k PBKDF2) per request → DoS; key decrypt precedes parse | API/DoS |
 | C2 | Medium | ✅ **Resolved** | No `MAX_CONTENT_LENGTH` — unbounded request bodies | API/DoS |
 | C3 | Medium | ✅ **Resolved** | Leaf PKCS#12 export password via GET; weak `changeit` default | API |
-| C4 | Low-Med | Carried | Host-header injection into issued-cert OCSP/CRL URLs (default behavior) | API |
+| C4 | Low-Med | ✅ **Mitigated** | Host-header trust for issued-cert URLs — documented; **pin `SERVER_NAME_FOR_OCSP`** in production to stop trusting the Host header | API |
 | C5 | Low-Med | ✅ **Resolved** | Open-redirect via backslash in `next` (Werkzeug emits `/\` unencoded) | API |
 | D1 | Medium | Carried | No rate limiting / lockout / MFA on login or Basic Auth | AuthN |
-| D2 | Medium | Carried | Migration grants `role='admin'` to all pre-existing users | AuthZ |
+| D2 | Medium | ✅ **Resolved** | Role migration now defaults to **least-privilege** and promotes only the configured `ADMIN_USERNAME` | AuthZ |
 | D3 | Medium | Carried | Basic Auth default-on over plaintext; failed attempts flood audit; `_burn_hash` CPU amplification | AuthN |
 | D4 | Low | Carried | No multi-party authorization for CA operations (now incl. key export) | AuthZ |
-| D5 | Low | Carried | Default-admin creation race; ADMIN_PASSWORD not rotated after first boot | AuthN |
+| D5 | Low | ✅ **Resolved** | Default-admin seed guarded by the unique constraint (`IntegrityError` → rollback); rotation documented | AuthN |
 | D6 | Medium | ✅ **Resolved** | LDAP: configuring only the admin group grants **every** directory user a `csr_requester` account | AuthZ |
 | D7 | Low | **NEW** | LDAP: credential cache masks directory-side password/disable/role changes for up to TTL | AuthN |
 | D8 | Low | **NEW** | CSRF fully skipped for Basic Auth — browser-cached credentials enable CSRF | AuthN |
 | E1 | **High** | Carried | No TLS in shipped stack; secure-cookie/OCSP-scheme default insecure | Transit |
 | E2 | Low | ✅ **Resolved** | Runtime CDN dependency; no CSP (SRI present); inline theme script needs nonce under CSP | Transit |
-| E3 | Medium | **NEW** | LDAP: plaintext `ldap://` silently allowed; no TLS guardrail at startup | Transit |
+| E3 | Medium | ✅ **Resolved** | Startup **refuses cleartext `ldap://`** (no ldaps/StartTLS) unless `LDAP_ALLOW_PLAINTEXT=true` | Transit |
 | F1 | Medium | Carried | Key material not zeroizable; resident in memory/swap/core dumps | Runtime |
-| F2 | Medium | Carried | Debug mode exposes Werkzeug debugger and bypasses insecure-default checks | Runtime |
-| F3 | Low | Carried | CRL number increment race across workers | Runtime |
+| F2 | Medium | ✅ **Mitigated** | Debug mode now **warns loudly** (RCE + checks skipped) instead of silently; shipped gunicorn stack never enables it | Runtime |
+| F3 | Low | ✅ **Resolved** | CRL number incremented **atomically** (`UPDATE … crl_number + 1`) — no duplicates across workers | Runtime |
 | G1 | Medium | Carried | Audit log not tamper-evident; no anomaly alerting | Logging |
 | G2 | Low | ✅ **Resolved** | `remote_addr` without `ProxyFix` — wrong client IP in logs/limits | Logging |
 | H1 | Medium | Carried | Container runs as root; no hardening in compose | Container |
@@ -116,6 +116,7 @@ Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A 
 - **v2.0 (SoftHSM/PKCS#11 key backend):** **A1** — CA signing keys can be held in a PKCS#11 token (SoftHSM), non-exportable and never resident in application memory; selectable per-CA (software backend remains default), with a one-way `flask keys migrate-to-hsm`. This also **mitigates F1** (HSM keys never enter process memory/swap/core) and the key-export limb of **A7** (HSM-backed CA keys cannot be exported).
 - **v2.0.1:** SoftHSM token-init made **idempotent** (a container restart no longer creates duplicate `cert-manager` tokens that broke HSM signing via `MultipleTokensReturned`); the stale world-readable `instance/` dev DB **git-removed and `instance/` gitignored** (closes the `instance/` limb of **A2**).
 - **CI supply-chain hardening:** **J1** (CI actions SHA-pinned), **H2** (base image digest-pinned + Trivy image scan), **I1** (deps hash-locked via `--require-hashes`), **I2** (pip-audit + Trivy with a weekly cron), **J2** (release images cosign-signed + SLSA provenance + SBOM); pins bumped by Dependabot.
+- **Auth/runtime quick-wins:** **E3** (startup refuses cleartext LDAP), **F2** (debug mode warns loudly instead of silently skipping the insecure-default guard), **D2** (role migration defaults to least-privilege), **D5** (default-admin seed race guarded), **F3** (atomic CRL-number increment), **C4** (documented — pin `SERVER_NAME_FOR_OCSP` in production).
 - **Headline still-open:** the rest of **A7** for *software*-backed CAs (unencrypted key PEM **at rest**, dual control) — *transport is a deployment responsibility met by the required reverse proxy (see A7/E1)*; **E1** (the shipped compose still ships no TLS proxy); and **H1** (container runs as root). *(A1 resolved in v2.0.)*
 
 ---
@@ -193,7 +194,7 @@ Responses are signed by the CA key on every request (no delegated `id-kp-OCSPSig
 ### [MEDIUM] C3 — Leaf PKCS#12 export password via GET; weak default — *Carried*
 `certificates.download` reads `request.args.get("password", "changeit")` (`certificates.py:242`) — password in the URL (logs/history/`Referer`) and a well-known weak default. *(The new CA-export instance of this is folded into A7.)* **Fix:** accept the export password via POST only, require it (no default), enforce minimum length.
 
-### [LOW-MEDIUM] C4 — Host-header injection into issued-certificate OCSP/CRL URLs — *Carried*
+### [LOW-MEDIUM] C4 — Host-header injection into issued-certificate OCSP/CRL URLs — ✅ *Mitigated (documented; pin `SERVER_NAME_FOR_OCSP`)*
 When `SERVER_NAME_FOR_OCSP` is at its default `localhost:5000` (the **default** compose value), the OCSP AIA URL baked into every issued cert is built from `request.host` (`certificates.py:52-54,95`; `csr.py:134-136,163`), which is attacker-controllable; there is no Flask `SERVER_NAME` / host allowlist. **Fix:** require an explicit `SERVER_NAME_FOR_OCSP` in production (never derive from `request.host`); set Flask `SERVER_NAME` / a trusted-host allowlist; have the proxy enforce a canonical Host.
 
 ### [LOW-MEDIUM] C5 — Open-redirect via backslash in `next` — *Carried (confirmed exploitable)*
@@ -206,7 +207,7 @@ When `SERVER_NAME_FOR_OCSP` is at its default `localhost:5000` (the **default** 
 ### [MEDIUM] D1 — No rate limiting, lockout, or MFA — *Carried (amplified by LDAP)*
 Login and Basic Auth have no throttle/lockout; rate limiting is off by default and, when enabled, uses per-worker `memory://`. The credential cache stores only **successful** auths, so every failed guess takes the full path — and with LDAP enabled, each Basic-Auth failure drives a **fresh directory bind** (online guessing + potential directory-side account-lockout DoS). **Fix:** enable rate limiting by default with a shared backend, stricter on `/auth/login` and Basic-Auth; per-account failed-attempt throttling before hitting LDAP; admin MFA; a password policy.
 
-### [MEDIUM] D2 — Migration escalates all pre-existing users to admin — *Carried*
+### [MEDIUM] D2 — Migration escalates all pre-existing users to admin — ✅ *Resolved*
 `_migrate_schema` runs `ADD COLUMN role ... DEFAULT 'admin'` (`app/__init__.py:240-242`), contradicting the model default `csr_requester`. Any legacy account becomes admin on upgrade, unaudited. *(Real-world impact is limited — pre-role installs only had admins — but it violates fail-safe defaults.)* The new `auth_source DEFAULT 'local'` migration is correct. **Fix:** default the added column to `csr_requester` and promote the known bootstrap admin explicitly; log migration-time assignments.
 
 ### [MEDIUM] D3 — Basic Auth default-on over plaintext; audit flooding; hash amplification — *Carried*
@@ -215,7 +216,7 @@ Login and Basic Auth have no throttle/lockout; rate limiting is off by default a
 ### [LOW] D4 — No multi-party authorization for CA operations — *Carried (more relevant post-A7)*
 Any single admin can create/revoke CAs, sign CSRs, and now **export CA private keys** (A7) with no dual control. One compromised admin account is catastrophic. **Fix:** role separation + m-of-n approval for CA key generation, sub-CA issuance, revocation, and key export; per-operation step-up re-auth.
 
-### [LOW] D5 — Default-admin creation race; non-rotating admin password — *Carried*
+### [LOW] D5 — Default-admin creation race; non-rotating admin password — ✅ *Resolved*
 `_create_default_admin` does check-then-insert per worker (race on the unique username), and `ADMIN_PASSWORD` seeds only first boot. **Fix:** seed once in the entrypoint guarded by the unique constraint; document rotation.
 
 ### [MEDIUM] D6 — LDAP admin-group-only config grants every directory user access (NEW)
@@ -239,7 +240,7 @@ Gunicorn binds plain HTTP `0.0.0.0:5000`; compose publishes `5000:5000` with no 
 ### [LOW] E2 — Runtime CDN dependency; no CSP — *Carried*
 Only `X-Content-Type-Options`/`X-Frame-Options` are set; no CSP/HSTS/Referrer-Policy. SRI on the Bootstrap CDN is correctly present. Note: the new dark-theme inline `<script>` blocks (`base.html`) would require a nonce/hash (not `'unsafe-inline'`) if a strict CSP is added. **Fix:** add CSP/HSTS/Referrer-Policy; self-host Bootstrap; nonce the inline theme scripts.
 
-### [MEDIUM] E3 — LDAP plaintext silently allowed; no startup TLS guardrail (NEW)
+### [MEDIUM] E3 — LDAP plaintext silently allowed; no startup TLS guardrail — ✅ *Resolved*
 `_build_server` only wraps TLS/StartTLS when the URI is `ldaps://` or `LDAP_USE_STARTTLS` is true (`ldap_service.py:80-87`). With the defaults (`LDAP_USE_STARTTLS=false`) and a plain `ldap://` URI, every end-user bind and the `LDAP_BIND_PASSWORD` service bind transit in cleartext; `_validate_ldap_config` never checks transport encryption, so the app boots into plaintext auth. **Fix:** refuse to boot (or require an explicit `LDAP_ALLOW_PLAINTEXT=true` opt-in) when `LDAP_ENABLED`, the URI is `ldap://`, and StartTLS is off. *(Positive: when TLS **is** used, it verifies chain + hostname by default — see Positive Controls.)*
 
 ---
@@ -249,10 +250,10 @@ Only `X-Content-Type-Options`/`X-Frame-Options` are set; no CSP/HSTS/Referrer-Po
 ### [MEDIUM] F1 — Key material not zeroizable; memory-resident — *Carried (mitigated for HSM CAs, v2.0)*
 Decrypted keys and the passphrase are ordinary Python objects (immutable `bytes`/`str`), not wiped after use; they can persist in memory, swap, and core dumps. **Fix:** minimize key lifetime; disable swap/core dumps for the process; prefer an HSM/KMS so plaintext keys never enter the app (A1). **Mitigated (v2.0):** for **HSM-backed CAs** (A1) the signing key stays in the PKCS#11 token and never enters Python memory/swap/core dumps; this finding now applies only to *software*-backed CA keys and the leaf keys the server escrows (A5).
 
-### [MEDIUM] F2 — Debug mode exposes the Werkzeug debugger and bypasses the insecure-default guard — *Carried*
+### [MEDIUM] F2 — Debug mode exposes the Werkzeug debugger and bypasses the insecure-default guard — ✅ *Mitigated*
 `_check_security` returns early under `app.debug` (`app/__init__.py:137`); as shipped (gunicorn, no `FLASK_DEBUG`) the checks run — but running with `--debug`/`FLASK_DEBUG=1` in production both disables insecure-default rejection and exposes the PIN-guarded Werkzeug console (RCE). **Fix:** never enable debug in production; keep the guard active regardless of debug; document prominently.
 
-### [LOW] F3 — Non-atomic CRL number increment — *Carried*
+### [LOW] F3 — Non-atomic CRL number increment — ✅ *Resolved*
 `ca.crl_number += 1` then commit is not atomic across the 2 workers; concurrent CRL generation can duplicate/skip a CRL number. **Fix:** use an atomic DB update / row lock, or serialize CRL generation.
 
 ---

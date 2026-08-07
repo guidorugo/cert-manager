@@ -24,6 +24,11 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
     ADMIN_PASSWORD = _read_secret("ADMIN_PASSWORD", "admin")
+    # C4: hostname baked into the OCSP/CRL URLs of issued certs. These URLs are
+    # PERMANENT, so in production pin this to your real hostname. While left at
+    # the default, the hostname is auto-detected from the request Host header
+    # (convenient for a self-hosted LAN, but a client-controlled value) — pin it
+    # to stop trusting the Host header.
     SERVER_NAME_FOR_OCSP = os.environ.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
 
     # Cap request bodies to blunt memory-exhaustion DoS (C2). OCSP/CRL/import
@@ -88,6 +93,9 @@ class Config:
     LDAP_SERVER_URI = os.environ.get("LDAP_SERVER_URI", "")
     LDAP_USE_STARTTLS = os.environ.get("LDAP_USE_STARTTLS", "false").lower() == "true"
     LDAP_TLS_VERIFY = (os.environ.get("LDAP_TLS_VERIFY") or "true").lower() == "true"
+    # E3: startup refuses cleartext ldap:// (no ldaps://, no StartTLS) unless this
+    # is explicitly set true.
+    LDAP_ALLOW_PLAINTEXT = os.environ.get("LDAP_ALLOW_PLAINTEXT", "false").lower() == "true"
     LDAP_CA_CERT_FILE = os.environ.get("LDAP_CA_CERT_FILE", "")
     LDAP_USER_DN_TEMPLATE = os.environ.get("LDAP_USER_DN_TEMPLATE", "")
     LDAP_BIND_DN = os.environ.get("LDAP_BIND_DN", "")

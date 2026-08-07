@@ -104,7 +104,14 @@ def generate_crl(ca, passphrase, validity_days=7):
     ca_cert = x509.load_pem_x509_certificate(ca.certificate_pem.encode())
 
     now = datetime.now(timezone.utc)
-    ca.crl_number += 1
+    # F3: atomic increment so concurrent workers can't mint duplicate CRL numbers.
+    db.session.query(CertificateAuthority).filter(
+        CertificateAuthority.id == ca.id
+    ).update(
+        {CertificateAuthority.crl_number: CertificateAuthority.crl_number + 1},
+        synchronize_session=False,
+    )
+    db.session.refresh(ca)
 
     builder = (
         x509.CertificateRevocationListBuilder()
