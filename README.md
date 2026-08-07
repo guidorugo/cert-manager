@@ -18,8 +18,10 @@ A web-based X.509 Certificate Authority management application built with Python
 - **HTTP Basic Auth**: Stateless API access via `curl -u user:pass` for scripts and automation, alongside session-based browser auth
 - **Dark Theme**: Light/dark mode toggle with OS-preference default and per-browser persistence
 - **Security**: Private keys encrypted at rest with Fernet (PBKDF2-derived key, 600k iterations), session hardening, insecure-default rejection
+- **Forced first-login password change**: The bootstrap admin seeded from `ADMIN_PASSWORD` must set a new password before using the app, so the seed credential can't become permanent; self-service change-password for any local user
 - **Hardware-backed keys (SoftHSM/PKCS#11)**: Optionally hold CA signing keys in a PKCS#11 token so they never enter application memory and cannot be exported — selectable per-CA, with a one-way migration for existing CAs and a drop-in path to a real hardware HSM
 - **LDAP Login**: Optional LDAP/Active Directory authentication with group-to-role mapping and automatic user provisioning
+- **Version & update awareness**: The footer shows the running version; an opt-in, cached check flags in the footer when a newer GitHub release is available
 
 ## Quick Start
 
@@ -36,8 +38,11 @@ docker compose up --build
 ```
 
 The script prints the generated admin password (also saved as `ADMIN_PASSWORD`
-in `.env`). Open `http://localhost:5000`, log in as `admin` with that password,
-and change it after first login. The app **refuses to start** with the shipped
+in `.env`). Open `http://localhost:5000` and log in as `admin` with that
+password — the app **requires you to set a new password on first login**. After
+that the admin's password lives only in the database, so `ADMIN_PASSWORD` is
+unused and can be deleted from `.env` (it is re-read only if the database is
+reset to zero users). The app also **refuses to start** with the shipped
 placeholder credentials, so this bootstrap step is required — a bare
 `docker compose up` on a fresh clone fails on the missing
 `secrets/master_passphrase` mount.
@@ -334,7 +339,8 @@ python -m pytest tests/ -v
 | `MASTER_PASSPHRASE` | `dev-passphrase` | Key encryption passphrase |
 | `DATABASE_URL` | `sqlite:///cert-manager.db` | Database URI |
 | `ADMIN_USERNAME` | `admin` | Default admin username |
-| `ADMIN_PASSWORD` | `admin` | Default admin password |
+| `ADMIN_PASSWORD` | `admin` | Seeds the **first** admin only (when no users exist); a change is forced on first login, after which it is unused and can be removed |
+| `MIN_PASSWORD_LENGTH` | `12` | Minimum length when setting a new password on the change-password page |
 | `SERVER_NAME_FOR_OCSP` | `localhost:5000` | Server hostname for OCSP/CRL URLs. When at default, auto-detected from request |
 | `SESSION_LIFETIME_MINUTES` | `30` | Session timeout in minutes |
 | `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting (requires Flask-Limiter) |
@@ -350,6 +356,9 @@ python -m pytest tests/ -v
 | `MAX_CA_VALIDITY_DAYS` | `7305` | Cap on issued CA validity |
 | `MIN_RSA_KEY_SIZE` | `2048` | Minimum accepted RSA key size |
 | `OCSP_KEY_CACHE_TTL_SECONDS` | `300` | In-memory TTL for the decrypted CA key used by OCSP (`0` disables) |
+| `UPDATE_CHECK_ENABLED` | `false` | Show a footer "Update available" badge when a newer GitHub release exists (opt-in; makes an outbound call) |
+| `UPDATE_CHECK_REPO` | `guidorugo/cert-manager` | Repository to check for the latest release |
+| `UPDATE_CHECK_INTERVAL_SECONDS` | `21600` | Cache TTL for the update check (6h) |
 | `MASTER_PASSPHRASE_FILE` / `SECRET_KEY_FILE` / `ADMIN_PASSWORD_FILE` | – | Read the secret from a file (Docker/systemd secret) instead of the env var |
 | `LDAP_ENABLED` | `false` | Enable LDAP authentication for the web login |
 | `LDAP_SERVER_URI` | – | LDAP server URI(s), e.g. `ldaps://dc01:636` (comma-separated for failover) |
