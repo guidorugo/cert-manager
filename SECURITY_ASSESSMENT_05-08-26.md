@@ -99,7 +99,7 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | F3 | Low | ✅ **Resolved** | CRL number incremented **atomically** (`UPDATE … crl_number + 1`) — no duplicates across workers | Runtime |
 | G1 | Medium | Carried | Audit log not tamper-evident; no anomaly alerting | Logging |
 | G2 | Low | ✅ **Resolved** | `remote_addr` without `ProxyFix` — wrong client IP in logs/limits | Logging |
-| H1 | Medium | Carried | Container runs as root; no hardening in compose | Container |
+| H1 | Medium | ✅ **Resolved** | gunicorn runs **non-root** (uid 1000, privilege-drop entrypoint); `cap_drop: [ALL]` + `no-new-privileges` | Container |
 | H2 | Low-Med | ✅ **Resolved** | Base image **digest-pinned**; **Trivy** image scan added; Dependabot bumps | Container |
 | I1 | Medium | ✅ **Resolved** | Deps **hash-locked** (`requirements.in` → hashed `requirements.txt`, `--require-hashes`) | Supply chain |
 | I2 | Low-Med | ✅ **Resolved** | **pip-audit** + **Trivy** in CI, with a weekly cron re-scan | Supply chain |
@@ -117,7 +117,8 @@ Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A 
 - **v2.0.1:** SoftHSM token-init made **idempotent** (a container restart no longer creates duplicate `cert-manager` tokens that broke HSM signing via `MultipleTokensReturned`); the stale world-readable `instance/` dev DB **git-removed and `instance/` gitignored** (closes the `instance/` limb of **A2**).
 - **CI supply-chain hardening:** **J1** (CI actions SHA-pinned), **H2** (base image digest-pinned + Trivy image scan), **I1** (deps hash-locked via `--require-hashes`), **I2** (pip-audit + Trivy with a weekly cron), **J2** (release images cosign-signed + SLSA provenance + SBOM); pins bumped by Dependabot.
 - **Auth/runtime quick-wins:** **E3** (startup refuses cleartext LDAP), **F2** (debug mode warns loudly instead of silently skipping the insecure-default guard), **D2** (role migration defaults to least-privilege), **D5** (default-admin seed race guarded), **F3** (atomic CRL-number increment), **C4** (documented — pin `SERVER_NAME_FOR_OCSP` in production).
-- **Headline still-open:** the rest of **A7** for *software*-backed CAs (unencrypted key PEM **at rest**, dual control) — *transport is a deployment responsibility met by the required reverse proxy (see A7/E1)*; **E1** (the shipped compose still ships no TLS proxy); and **H1** (container runs as root). *(A1 resolved in v2.0.)*
+- **H1 (non-root container):** gunicorn drops to a non-root `app` user (uid 1000) via a privilege-drop entrypoint; `cap_drop: [ALL]` + `no-new-privileges`. Verified live (data/HSM/DB writes intact).
+- **Headline still-open:** the rest of **A7** for *software*-backed CAs (unencrypted key PEM **at rest**, dual control) — *transport is a deployment responsibility met by the required reverse proxy (see A7/E1)*; and **E1** (the shipped compose still ships no TLS proxy). *(A1 resolved in v2.0.)*
 
 ---
 
@@ -270,8 +271,10 @@ Decrypted keys and the passphrase are ordinary Python objects (immutable `bytes`
 
 ## H. Container & Infrastructure
 
-### [MEDIUM] H1 — Container runs as root; no hardening — *Carried*
+### [MEDIUM] H1 — Container runs as root; no hardening — ✅ *Resolved*
 No `USER` in the Dockerfile (gunicorn runs as uid 0); compose has no `read_only`, `cap_drop`, `security_opt: no-new-privileges`, or `user:`. **Fix:** add a non-root `USER` (own `/app/data`), `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, read-only rootfs, resource limits, a healthcheck.
+
+**Resolved:** the entrypoint now starts as root **only** to chown the bind-mounted data volume, then `setpriv`-drops to a non-root **`app` user (uid 1000)** for token init, DB migration, and gunicorn — so the long-running network-facing process never runs as root. Compose adds `security_opt: [no-new-privileges:true]` and `cap_drop: [ALL]` with only `CHOWN`/`SETUID`/`SETGID` added back for the brief root phase (verified: even root then lacks `DAC_OVERRIDE`). uid 1000 matches the host's secret/volume owner so the app reads the Docker secrets. Verified live: gunicorn runs as uid 1000, data intact, software + HSM-token CRL signing and DB writes all work. *(Not done: read-only rootfs — the app writes the `/app/data` volume + gunicorn's control socket; deferred.)*
 
 ### [LOW-MEDIUM] H2 — Base image pinned by mutable tag; no image scanning — ✅ *Resolved (CI supply-chain hardening)*
 `FROM python:3.13-slim` (mutable tag); no Trivy/Grype scan. **Fix:** pin `python:3.13-slim@sha256:...` and update via Dependabot; add an image-vuln scan.
