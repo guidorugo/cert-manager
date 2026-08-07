@@ -221,11 +221,10 @@ def _check_security(app):
               "Set a strong MASTER_PASSPHRASE environment variable.", file=sys.stderr)
         sys.exit(1)
 
-    insecure_admin_password = Config._INSECURE_ADMIN_PASSWORD
-    if app.config.get("ADMIN_PASSWORD") == insecure_admin_password:
-        print("FATAL: ADMIN_PASSWORD is set to the insecure default. "
-              "Set a strong ADMIN_PASSWORD environment variable.", file=sys.stderr)
-        sys.exit(1)
+    # NOTE: the ADMIN_PASSWORD insecure-default guard lives in
+    # _create_default_admin — it only matters when the seed actually creates the
+    # first admin. Once an admin exists, ADMIN_PASSWORD is unused and may be
+    # removed from the environment / .env.
 
 
 def _validate_ldap_config(app):
@@ -456,8 +455,18 @@ def _create_default_admin(app):
 
     if User.query.count() != 0:
         return
+    password = app.config["ADMIN_PASSWORD"]
+    # Reject the insecure default only here, where the seed would actually
+    # become the first admin's password (skipped under testing/debug, matching
+    # _check_security). Because this runs once — only when no user exists —
+    # ADMIN_PASSWORD can be dropped from .env after the first admin is created.
+    if (password == Config._INSECURE_ADMIN_PASSWORD
+            and not app.config.get("TESTING") and not app.debug):
+        print("FATAL: creating the initial admin, but ADMIN_PASSWORD is the "
+              "insecure default 'admin'. Set a strong ADMIN_PASSWORD.", file=sys.stderr)
+        sys.exit(1)
     admin = User(username=app.config["ADMIN_USERNAME"], role="admin")
-    admin.set_password(app.config["ADMIN_PASSWORD"])
+    admin.set_password(password)
     # The ADMIN_PASSWORD env is a bootstrap seed — force a change on first login
     # so it cannot silently become the permanent admin password.
     admin.must_change_password = True

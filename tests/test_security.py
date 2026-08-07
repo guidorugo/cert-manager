@@ -57,6 +57,28 @@ class TestSecurityDefaults:
         app = create_app(SecureAdminConfig)
         assert app is not None
 
+    def test_admin_password_unused_once_admin_exists(self, tmp_path):
+        # Once an admin exists, ADMIN_PASSWORD is never used again, so it may be
+        # removed from the environment (it then defaults to 'admin') without
+        # blocking startup — the insecure-default guard only fires when seeding.
+        uri = f"sqlite:///{tmp_path / 'cm.db'}"
+
+        class Boot(Config):
+            TESTING = False
+            SQLALCHEMY_DATABASE_URI = uri
+            SECRET_KEY = "strong-secret-key"
+            MASTER_PASSPHRASE = "strong-passphrase"
+            ADMIN_PASSWORD = "strong-admin-password-123"
+            WTF_CSRF_ENABLED = False
+
+        create_app(Boot)  # seeds the first admin
+
+        class Reboot(Boot):
+            ADMIN_PASSWORD = "admin"  # reverted to default / effectively removed
+
+        app = create_app(Reboot)  # admin already exists → no check, no exit
+        assert app is not None
+
 
 class TestSessionConfig:
     """Session cookie security settings."""
