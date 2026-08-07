@@ -63,6 +63,17 @@ services:
     secrets:
       - master_passphrase
     restart: unless-stopped
+    # H1: the app process runs as non-root (see entrypoint.sh). Block privilege
+    # escalation and drop all Linux capabilities except the few the root startup
+    # phase needs (chown the volume + setuid to drop privileges).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
 
 secrets:
   master_passphrase:

@@ -24,11 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         softhsm2 opensc \
     && rm -rf /var/lib/apt/lists/*
 
+# H1: non-root runtime user (uid 1000 to match the host secret/volume owner).
+# The entrypoint starts as root only to fix volume ownership, then drops to it.
+RUN useradd --system --uid 1000 --user-group --create-home --home-dir /home/app app
+
 COPY --from=builder /install /usr/local
 
 COPY app/ app/
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+COPY entrypoint.sh entrypoint-app.sh ./
+RUN chmod +x entrypoint.sh entrypoint-app.sh
 
 RUN mkdir -p /app/data
 

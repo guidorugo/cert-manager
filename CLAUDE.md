@@ -92,6 +92,7 @@ python -m pytest tests/ -v
 - **OCSP URL scheme**: Configurable via `OCSP_URL_SCHEME` (default: `http`, set to `https` in production).
 - **Schema migration**: `_migrate_schema()` in `app/__init__.py` handles adding new columns to existing SQLite tables via ALTER TABLE.
 - **Last-admin guards**: Cannot deactivate or demote the last active admin user.
+- **Non-root container (H1)**: `entrypoint.sh` starts as root only to `chown` the bind-mounted `/app/data`, then `setpriv`-drops to the `app` user (**uid 1000**) which runs `entrypoint-app.sh` (token init, migration, gunicorn). Compose adds `no-new-privileges` + `cap_drop: [ALL]` (only `CHOWN`/`SETUID`/`SETGID` added back). uid 1000 must be able to read the Docker secret files (bind-mounted with host ownership).
 
 ## HTTP Basic Auth
 - **Alternative to session auth**: Enables programmatic access via `curl -u user:pass`, scripts, and automation.
