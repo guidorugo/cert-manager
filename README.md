@@ -19,7 +19,7 @@ A web-based X.509 Certificate Authority management application built with Python
 - **Dark Theme**: Light/dark mode toggle with OS-preference default and per-browser persistence
 - **Security**: Private keys encrypted at rest with Fernet (PBKDF2-derived key, 600k iterations), session hardening, insecure-default rejection
 - **Forced first-login password change**: The bootstrap admin seeded from `ADMIN_PASSWORD` must set a new password before using the app, so the seed credential can't become permanent; self-service change-password for any local user
-- **Hardware-backed keys (SoftHSM/PKCS#11)**: Optionally hold CA signing keys in a PKCS#11 token so they never enter application memory and cannot be exported — selectable per-CA, with a one-way migration for existing CAs and a drop-in path to a real hardware HSM
+- **Hardware-backed keys (SoftHSM/PKCS#11)**: Enabled by default — CA signing keys can be held in a PKCS#11 token so they never enter application memory and cannot be exported; selectable per-CA (software stays the default backend), with a one-way migration for existing CAs and a drop-in path to a real hardware HSM
 - **LDAP Login**: Optional LDAP/Active Directory authentication with group-to-role mapping and automatic user provisioning
 - **Version & update awareness**: The footer shows the running version; an opt-in, cached check flags in the footer when a newer GitHub release is available
 
@@ -28,9 +28,9 @@ A web-based X.509 Certificate Authority management application built with Python
 ### Docker (recommended)
 
 ```bash
-# 1. Generate local secrets + .env (master passphrase, a strong SECRET_KEY, and
-#    a random admin password). Safe to re-run — it never overwrites existing
-#    values. Add --hsm to also create SoftHSM PIN secrets.
+# 1. Generate local secrets + .env (master passphrase, a strong SECRET_KEY, a
+#    random admin password, and the SoftHSM token PINs). Safe to re-run — it
+#    never overwrites existing values.
 ./scripts/init-secrets.sh
 
 # 2. (Optional) review .env for other settings, then build and run
@@ -146,25 +146,17 @@ openssl ocsp \
 
 ## Hardware-Backed Keys (SoftHSM / PKCS#11)
 
-By default CA private keys are Fernet-encrypted files. Optionally, keys can live
-in a **PKCS#11 token (SoftHSM)** so they never enter application memory and are
-**non-exportable** — the strongest protection for a trust anchor, and the same
-code path works with a real hardware HSM later.
+CA private keys are Fernet-encrypted files by default, but the **SoftHSM
+PKCS#11 backend is enabled out of the box** so keys can instead live in a token
+where they **never enter application memory** and are **non-exportable** — the
+strongest protection for a trust anchor, and the same code path works with a
+real hardware HSM later.
 
-The Docker image already bundles `softhsm2`. To enable it, create the two PIN
-secret files and give the app the PKCS#11 settings (a `docker-compose.override.yml`
-keeps this local — see the commented block in `docker-compose.yml`):
-
-```bash
-printf '1234'     > secrets/pkcs11_user_pin && chmod 600 secrets/pkcs11_user_pin
-printf '12345678' > secrets/pkcs11_so_pin   && chmod 600 secrets/pkcs11_so_pin
-```
-
-Then set on the app service: `SOFTHSM2_CONF=/app/data/softhsm/softhsm2.conf`,
-`PKCS11_MODULE=/usr/lib/softhsm/libsofthsm2.so`, `PKCS11_TOKEN_LABEL=cert-manager`,
-`PKCS11_USER_PIN_FILE=/run/secrets/pkcs11_user_pin`,
-`PKCS11_SO_PIN_FILE=/run/secrets/pkcs11_so_pin`, and list both PIN secrets under
-`secrets:`. The entrypoint initialises the token on first boot.
+The Docker image bundles `softhsm2` (BSD-licensed), `docker-compose.yml` wires
+up the PKCS#11 settings, and `scripts/init-secrets.sh` generates the two token
+PINs (`secrets/pkcs11_user_pin`, `secrets/pkcs11_so_pin`); the entrypoint
+initialises the token on first boot. So after the standard bootstrap step
+nothing else is needed — the *Create CA* form simply offers HSM per-CA.
 
 - **Per-CA choice**: with the token configured, the *Create CA* form shows a
   **Key Protection** selector (Software vs HSM). Leave `KEY_BACKEND=software`
