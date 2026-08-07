@@ -11,9 +11,11 @@
 # Safe to re-run: it never overwrites an existing secret or a value you have
 # already customised — it only fills in what is missing or still a placeholder.
 #
+# Creates: secrets/master_passphrase, .env (strong SECRET_KEY / ADMIN_PASSWORD),
+# and the SoftHSM token PINs (the SoftHSM backend is enabled by default).
+#
 # Usage:
-#   ./scripts/init-secrets.sh          # software backend (default)
-#   ./scripts/init-secrets.sh --hsm    # also create SoftHSM PIN secrets
+#   ./scripts/init-secrets.sh
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -70,23 +72,22 @@ if grep -qE '^ADMIN_PASSWORD=admin$' .env; then
   note "(log in as the ADMIN_USERNAME from .env, then change this after first login)"
 fi
 
-# 3. Optional: SoftHSM PIN secrets (only when --hsm is passed). These pair with
-#    the docker-compose.override.yml block documented in docker-compose.yml.
-if [ "${1:-}" = "--hsm" ]; then
-  if [ ! -f secrets/pkcs11_user_pin ]; then
-    rand_pin 6 > secrets/pkcs11_user_pin
-    chmod 600 secrets/pkcs11_user_pin
-    note "created secrets/pkcs11_user_pin (random 6-digit)"
-  else
-    note "secrets/pkcs11_user_pin already exists — left unchanged"
-  fi
-  if [ ! -f secrets/pkcs11_so_pin ]; then
-    rand_pin 8 > secrets/pkcs11_so_pin
-    chmod 600 secrets/pkcs11_so_pin
-    note "created secrets/pkcs11_so_pin (random 8-digit)"
-  else
-    note "secrets/pkcs11_so_pin already exists — left unchanged"
-  fi
+# 3. SoftHSM token PINs — the SoftHSM backend is enabled by default in
+#    docker-compose.yml, so these are always generated. Never overwrite an
+#    existing PIN (it belongs to an already-initialised token).
+if [ ! -f secrets/pkcs11_user_pin ]; then
+  rand_pin 6 > secrets/pkcs11_user_pin
+  chmod 600 secrets/pkcs11_user_pin
+  note "created secrets/pkcs11_user_pin (random 6-digit)"
+else
+  note "secrets/pkcs11_user_pin already exists — left unchanged"
+fi
+if [ ! -f secrets/pkcs11_so_pin ]; then
+  rand_pin 8 > secrets/pkcs11_so_pin
+  chmod 600 secrets/pkcs11_so_pin
+  note "created secrets/pkcs11_so_pin (random 8-digit)"
+else
+  note "secrets/pkcs11_so_pin already exists — left unchanged"
 fi
 
 echo "Done. Next: docker compose up --build"
