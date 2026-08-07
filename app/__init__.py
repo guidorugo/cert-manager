@@ -148,7 +148,16 @@ def _setup_basic_auth(app):
 
 def _check_security(app):
     """Reject insecure defaults in production."""
-    if app.config.get("TESTING") or app.debug:
+    if app.config.get("TESTING"):
+        return
+    if app.debug:
+        # F2: debug mode exposes the Werkzeug interactive debugger (arbitrary
+        # remote code execution) and skips the fatal insecure-default checks
+        # below. Make that loud rather than silent — never enable debug in
+        # production (the shipped gunicorn stack never does).
+        print("WARNING: Flask debug mode is ON — the interactive debugger allows "
+              "remote code execution and the insecure-default checks are skipped. "
+              "Use only for local development.", file=sys.stderr)
         return
 
     insecure_secret = Config._INSECURE_SECRET_KEY
@@ -182,6 +191,17 @@ def _validate_ldap_config(app):
 
     if not app.config.get("LDAP_SERVER_URI"):
         fatal("LDAP_ENABLED is true but LDAP_SERVER_URI is not set.")
+
+    # E3: refuse silent plaintext LDAP. Every server URI must be ldaps:// or use
+    # StartTLS, unless the operator explicitly opts into cleartext.
+    if not app.config.get("LDAP_ALLOW_PLAINTEXT"):
+        uris = [u.strip() for u in app.config["LDAP_SERVER_URI"].split(",") if u.strip()]
+        plaintext = [u for u in uris
+                     if u.lower().startswith("ldap://") and not app.config.get("LDAP_USE_STARTTLS")]
+        if plaintext:
+            fatal("LDAP over cleartext is refused: " + ", ".join(plaintext) +
+                  ". Use ldaps:// or set LDAP_USE_STARTTLS=true; to override "
+                  "(not recommended) set LDAP_ALLOW_PLAINTEXT=true.")
 
     template = app.config.get("LDAP_USER_DN_TEMPLATE")
     search_base = app.config.get("LDAP_USER_SEARCH_BASE")
@@ -296,9 +316,17 @@ def _migrate_schema():
     if "users" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("users")}
         if "role" not in columns:
+            # D2: default the new column to least-privilege so an upgrade from a
+            # pre-role schema does not blanket-grant admin to every existing
+            # user; then promote the configured ADMIN_USERNAME so an admin still
+            # exists. (On a fresh DB the column exists already and this is skipped.)
             db.session.execute(text(
-                "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'"
+                "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'csr_requester'"
             ))
+            db.session.execute(
+                text("UPDATE users SET role = 'admin' WHERE username = :u"),
+                {"u": current_app.config.get("ADMIN_USERNAME", "admin")},
+            )
         if "is_active_user" not in columns:
             db.session.execute(text(
                 "ALTER TABLE users ADD COLUMN is_active_user BOOLEAN NOT NULL DEFAULT 1"
@@ -363,10 +391,18 @@ def _migrate_schema():
 
 
 def _create_default_admin(app):
+    from sqlalchemy.exc import IntegrityError
     from .models.user import User
 
-    if User.query.count() == 0:
-        admin = User(username=app.config["ADMIN_USERNAME"], role="admin")
-        admin.set_password(app.config["ADMIN_PASSWORD"])
-        db.session.add(admin)
+    if User.query.count() != 0:
+        return
+    admin = User(username=app.config["ADMIN_USERNAME"], role="admin")
+    admin.set_password(app.config["ADMIN_PASSWORD"])
+    db.session.add(admin)
+    try:
         db.session.commit()
+    except IntegrityError:
+        # D5: another gunicorn worker seeded the admin concurrently — the unique
+        # username constraint makes the race safe; just roll back. (ADMIN_PASSWORD
+        # only seeds the first boot; rotate it via the UI afterwards.)
+        db.session.rollback()
