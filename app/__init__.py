@@ -69,12 +69,19 @@ def _register_template_context(app):
     the footer reflects exactly which build is running.
     """
     from ._version import __version__
+    from .services import update_service
 
     app_version = os.environ.get("APP_VERSION") or __version__
 
     @app.context_processor
     def inject_app_version():
-        return {"app_version": app_version}
+        update_available, latest_version = update_service.check(app.config)
+        return {
+            "app_version": app_version,
+            "update_available": update_available,
+            "latest_version": latest_version,
+            "update_repo": app.config.get("UPDATE_CHECK_REPO") or "guidorugo/cert-manager",
+        }
 
 
 def _setup_basic_auth(app):
