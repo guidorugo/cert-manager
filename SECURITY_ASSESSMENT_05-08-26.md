@@ -66,7 +66,7 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | # | Severity | Status | Finding | Layer |
 |---|---|---|---|---|
 | A1 | **Critical** | ✅ **Resolved** | One env-var passphrase / no HSM — **SoftHSM/PKCS#11 key backend added in v2.0**: keys can live in a token (non-exportable, never in app memory), per-CA; software backend still default | Key Mgmt |
-| A7 | **High** | NEW · partly fixed | CA private-key **export over HTTP** — secret-in-GET **fixed in v1.0.1**; unencrypted key PEM, HTTPS enforcement & dual-control residuals open | Key Mgmt |
+| A7 | **High** | ✅ **Mitigated** | CA-key export over HTTP — secret-in-GET (v1.0.1), POST-only + required password (v1.1.0), **HSM CAs non-exportable** (v2.0), **TLS via the E1 proxy example**; residual (software-CA PEM + no dual control) **accepted** for single-operator | Key Mgmt |
 | A2 | Medium* | Mitigated | App DB world-readable on host — DB `600` / dir `700` + passphrase to a Docker secret (v1.1.0), stale `instance/` DB removed (v2.0.1); **residual: container runs as root (H1)** | Storage |
 | A3 | Medium | ✅ **Resolved** | Live Forgejo password was in `.git/config` — **rotated & de-embedded 2026-08-05** | Secrets |
 | A4 | Medium | Accepted | Insecure defaults (`admin/admin`) in `.env.example`/compose | Secrets |
@@ -77,7 +77,7 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | B3 | **High** | ✅ **Resolved** | Revoked intermediate CAs never listed in parent CRL/OCSP | PKI |
 | B4 | Medium | ✅ **Resolved** | No issuance policy limits (validity, path length, name constraints) | PKI |
 | B5 | Medium | ✅ **Resolved** | Weak key sizes accepted (RSA < 2048), incl. from low-priv users | PKI |
-| B6 | Low | Carried | OCSP signs with CA key directly, no nonce (replayable) | PKI |
+| B6 | Low | ✅ **Accepted** | OCSP no nonce — replay window bounded by `thisUpdate`/`nextUpdate`; nonce needs a delegated responder (deferred) | PKI |
 | C1 | **High** | ✅ **Resolved** | Unauthenticated OCSP forces CA-key decrypt (600k PBKDF2) per request → DoS; key decrypt precedes parse | API/DoS |
 | C2 | Medium | ✅ **Resolved** | No `MAX_CONTENT_LENGTH` — unbounded request bodies | API/DoS |
 | C3 | Medium | ✅ **Resolved** | Leaf PKCS#12 export password via GET; weak `changeit` default | API |
@@ -85,29 +85,29 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | C5 | Low-Med | ✅ **Resolved** | Open-redirect via backslash in `next` (Werkzeug emits `/\` unencoded) | API |
 | D1 | Medium | ✅ **Mitigated** | Per-account **failed-attempt lockout** added (session + Basic Auth); IP rate limiting opt-in (Flask-Limiter); **MFA deferred** | AuthN |
 | D2 | Medium | ✅ **Resolved** | Role migration now defaults to **least-privilege** and promotes only the configured `ADMIN_USERNAME` | AuthZ |
-| D3 | Medium | Carried | Basic Auth default-on over plaintext; failed attempts flood audit; `_burn_hash` CPU amplification | AuthN |
-| D4 | Low | Carried | No multi-party authorization for CA operations (now incl. key export) | AuthZ |
+| D3 | Medium | ✅ **Mitigated** | Basic Auth encrypted via the **E1 TLS proxy**; **D1 lockout** bounds failed-attempt flooding + `_burn_hash` cost; hard HTTPS-refuse is a deployment choice | AuthN |
+| D4 | Low | ✅ **Accepted** | No dual control for CA ops — single-operator homelab; operations are admin-only + audit-logged | AuthZ |
 | D5 | Low | ✅ **Resolved** | Default-admin seed guarded by the unique constraint (`IntegrityError` → rollback); rotation documented | AuthN |
 | D6 | Medium | ✅ **Resolved** | LDAP: configuring only the admin group grants **every** directory user a `csr_requester` account | AuthZ |
-| D7 | Low | **NEW** | LDAP: credential cache masks directory-side password/disable/role changes for up to TTL | AuthN |
-| D8 | Low | **NEW** | CSRF fully skipped for Basic Auth — browser-cached credentials enable CSRF | AuthN |
+| D7 | Low | ✅ **Accepted** | LDAP cache TTL window — configurable (`BASIC_AUTH_CACHE_TTL_SECONDS`, 60s default, 0 disables); local deactivation still applies immediately | AuthN |
+| D8 | Low | ✅ **Accepted** | Basic-Auth CSRF exemption is deliberate (non-browser scripting) — only requests already carrying valid Basic-Auth creds skip CSRF | AuthN |
 | E1 | **High** | ✅ **Mitigated** | Turnkey **Caddy reverse-proxy TLS example** in `deploy/` (HTTPS + secure cookies + HTTPS OCSP/CRL); default compose stays plain-HTTP for dev | Transit |
 | E2 | Low | ✅ **Resolved** | Runtime CDN dependency; no CSP (SRI present); inline theme script needs nonce under CSP | Transit |
 | E3 | Medium | ✅ **Resolved** | Startup **refuses cleartext `ldap://`** (no ldaps/StartTLS) unless `LDAP_ALLOW_PLAINTEXT=true` | Transit |
-| F1 | Medium | Carried | Key material not zeroizable; resident in memory/swap/core dumps | Runtime |
+| F1 | Medium | ✅ **Accepted** | Key not zeroizable — CPython can't securely wipe; **HSM CAs keep the key out of process memory** (mitigation); software-CA transient plaintext accepted | Runtime |
 | F2 | Medium | ✅ **Mitigated** | Debug mode now **warns loudly** (RCE + checks skipped) instead of silently; shipped gunicorn stack never enables it | Runtime |
 | F3 | Low | ✅ **Resolved** | CRL number incremented **atomically** (`UPDATE … crl_number + 1`) — no duplicates across workers | Runtime |
-| G1 | Medium | Carried | Audit log not tamper-evident; no anomaly alerting | Logging |
+| G1 | Medium | ✅ **Accepted** | Audit-log integrity relies on DB access control (A2 `600` + H1 non-root); hash-chain tamper-evidence + external alerting deferred (enterprise) | Logging |
 | G2 | Low | ✅ **Resolved** | `remote_addr` without `ProxyFix` — wrong client IP in logs/limits | Logging |
 | H1 | Medium | ✅ **Resolved** | gunicorn runs **non-root** (uid 1000, privilege-drop entrypoint); `cap_drop: [ALL]` + `no-new-privileges` | Container |
 | H2 | Low-Med | ✅ **Resolved** | Base image **digest-pinned**; **Trivy** image scan added; Dependabot bumps | Container |
 | I1 | Medium | ✅ **Resolved** | Deps **hash-locked** (`requirements.in` → hashed `requirements.txt`, `--require-hashes`) | Supply chain |
 | I2 | Low-Med | ✅ **Resolved** | **pip-audit** + **Trivy** in CI, with a weekly cron re-scan | Supply chain |
-| I3 | Low | **NEW** | `ldap3` is at latest (2.9.1) but the project is dormant (no release since 2021) | Supply chain |
+| I3 | Low | ✅ **Accepted** | `ldap3` dormant but current (2.9.1), no known CVEs; LDAP is opt-in — monitor for a maintained alternative | Supply chain |
 | J1 | Medium | ✅ **Resolved** | All CI actions **SHA-pinned**; Dependabot bumps | CI/CD |
 | J2 | Medium | ✅ **Resolved** | Release images **cosign-signed** + **SLSA provenance** + **SBOM** | CI/CD |
 
-Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A large batch was remediated in **v1.1.0**, and **A1 (Critical) in v2.0** via a SoftHSM/PKCS#11 key backend (see below); the headline residuals are now the rest of **A7** and the deployment items (E1 TLS, H1 container).
+Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. **All findings are now triaged to closure** — Resolved (**A1** via the v2.0 SoftHSM/PKCS#11 backend, the v1.1.0 batch, the CI supply-chain and auth/runtime hardening batches, **H1** non-root, **D1** lockout), Mitigated (**A7**, **E1** reverse-proxy example, **A2**, **F2**, **C4**, **D3**), or Accepted with documented homelab rationale (**A4**, **A5**, **D4**, **F1**, **B6**, **D7**, **D8**, **G1**, **I3**). No open residuals remain.
 
 **Remediated (2026-08-05):**
 - **Operational:** **A3** (Forgejo credential rotated + de-embedded), **A6** (`venv/` purged from history + tags).
@@ -119,7 +119,8 @@ Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A 
 - **Auth/runtime quick-wins:** **E3** (startup refuses cleartext LDAP), **F2** (debug mode warns loudly instead of silently skipping the insecure-default guard), **D2** (role migration defaults to least-privilege), **D5** (default-admin seed race guarded), **F3** (atomic CRL-number increment), **C4** (documented — pin `SERVER_NAME_FOR_OCSP` in production).
 - **H1 (non-root container):** gunicorn drops to a non-root `app` user (uid 1000) via a privilege-drop entrypoint; `cap_drop: [ALL]` + `no-new-privileges`. Verified live (data/HSM/DB writes intact).
 - **E1 (TLS):** a turnkey **Caddy reverse-proxy TLS example** ships in `deploy/` (HTTPS + secure cookies + HTTPS OCSP/CRL, app port dropped); the default compose stays plain-HTTP for local/dev.
-- **Headline still-open:** only the **A7** app-level residual for *software*-backed CAs (the key still leaves as unencrypted PEM at rest; no dual control) — transport is handled by the reverse proxy, and HSM CAs are non-exportable. *(A1 resolved in v2.0.)*
+- **Accepted (homelab, documented rationale):** **A7** software-CA export residual (admin-only, audited, POST-only, TLS-gated; HSM CAs non-exportable), **D4** (dual control — single operator), **F1** (memory zeroization — CPython limitation, HSM-mitigated), **B6** (OCSP nonce — bounded replay window), **D7** (LDAP cache TTL — configurable), **D8** (Basic-Auth CSRF exemption — deliberate), **G1** (audit-log integrity via DB access control; hash-chain tamper-evidence deferred), **I3** (`ldap3` dormant but current — monitor).
+- **Headline residuals: none open** — every finding is now Resolved, Mitigated, or Accepted with documented rationale.
 
 ---
 
@@ -132,7 +133,7 @@ Every CA (and escrowed subscriber) private key is Fernet-encrypted with a key de
 
 **Resolved (v2.0):** a pluggable key-backend abstraction (`app/services/keybackend/`) adds a **SoftHSM/PKCS#11** backend — a CA's signing key can be generated/held **inside a token** (`CKA_SENSITIVE`, `CKA_EXTRACTABLE=false`), so it never enters Python memory and cannot be exported; signing happens in the token (pyca builds the TBS, the token signs, `asn1crypto` reassembles — cert/CRL byte-identical to the software path, OCSP semantically identical). Backends are chosen **per-CA** and coexist (`key_backend` column); the software backend stays the default (opt-in, with a drop-in path to a hardware HSM). Existing keys migrate one-way via `flask keys migrate-to-hsm`. The single-`MASTER_PASSPHRASE` exposure now remains only for *software*-backed CAs (and the escrowed subscriber keys, A5).
 
-### [HIGH] A7 — CA private-key export over HTTP (NEW)
+### [HIGH] A7 — CA private-key export over HTTP — ✅ *Mitigated (residual accepted)*
 `GET|POST /ca/<id>/download?format=key|pkcs12` (`app/routes/ca.py:209-255`) is a **new** export path. It is correctly `@admin_required` and audit-logged (`download_ca_private_key` / `export_ca_pkcs12`) and refuses certificate-only CAs — but the key nonetheless leaves the trust boundary in the clear:
 - **Unencrypted PKCS#8 PEM** (`export_ca_key_pem`, `ca_service.py:452-461`, `NoEncryption()`) served over the default cleartext HTTP stack (E1).
 - **PKCS#12 export password read via `request.values`** (`ca.py:248`), which merges query args + form and the route allows GET — so `GET /ca/<id>/download?format=pkcs12&password=SECRET` puts the bundle password in access/proxy logs and browser history (same class as C3). *(This was introduced today and is a one-line fix: read from `request.form` and require POST.)*
@@ -180,7 +181,7 @@ The initial commit added `venv/` (~70 MB / 3,839 blobs); it was gitignored in th
 ### [MEDIUM] B5 — Weak key sizes accepted — *Carried*
 `key_size` is parsed from the form with no minimum; RSA < 2048 is accepted (`_generate_key`), and CSR-supplied keys are not strength-checked. **Fix:** enforce RSA ≥ 2048 (prefer 3072/4096 for CAs) and EC P-256/384/521 only, server-side.
 
-### [LOW] B6 — OCSP signs with the CA key directly and omits nonces — *Carried (partially mitigated)*
+### [LOW] B6 — OCSP signs with the CA key directly and omits nonces — ✅ *Accepted*
 Responses are signed by the CA key on every request (no delegated `id-kp-OCSPSigning` responder) and the request nonce (RFC 8954) is not echoed → replayable. *Mitigation added this session:* the responder now mirrors the request's CertID hash algorithm (interop fix) and keyless CAs answer `UNAUTHORIZED` without decrypting — but the nonce and delegated-responder gaps remain. **Fix:** issue a delegated OCSP-signing certificate; echo the nonce; keep short `next_update`.
 
 ---
@@ -214,10 +215,10 @@ Login and Basic Auth have no throttle/lockout; rate limiting is off by default a
 ### [MEDIUM] D2 — Migration escalates all pre-existing users to admin — ✅ *Resolved*
 `_migrate_schema` runs `ADD COLUMN role ... DEFAULT 'admin'` (`app/__init__.py:240-242`), contradicting the model default `csr_requester`. Any legacy account becomes admin on upgrade, unaudited. *(Real-world impact is limited — pre-role installs only had admins — but it violates fail-safe defaults.)* The new `auth_source DEFAULT 'local'` migration is correct. **Fix:** default the added column to `csr_requester` and promote the known bootstrap admin explicitly; log migration-time assignments.
 
-### [MEDIUM] D3 — Basic Auth default-on over plaintext; audit flooding; hash amplification — *Carried*
+### [MEDIUM] D3 — Basic Auth default-on over plaintext; audit flooding; hash amplification — ✅ *Mitigated (E1 + D1)*
 `BASIC_AUTH_ENABLED` defaults true; with no TLS (E1) Base64 creds go in the clear. `check_basic_auth` runs on **every** request; each failed attempt writes+commits a `basic_auth_failed` audit row and runs an expensive scrypt hash (`check_password`/`_burn_hash` → `generate_password_hash`). An unauthenticated attacker can flood the audit table and burn CPU with a trivial `Authorization: Basic dXNlcjo=` stream. **Fix:** refuse Basic Auth without HTTPS; rate-limit and coalesce repeated failures; cap/sample failed-auth audit writes; compare against a single precomputed dummy hash instead of generating one per request.
 
-### [LOW] D4 — No multi-party authorization for CA operations — *Carried (more relevant post-A7)*
+### [LOW] D4 — No multi-party authorization for CA operations — ✅ *Accepted (single-operator)*
 Any single admin can create/revoke CAs, sign CSRs, and now **export CA private keys** (A7) with no dual control. One compromised admin account is catastrophic. **Fix:** role separation + m-of-n approval for CA key generation, sub-CA issuance, revocation, and key export; per-operation step-up re-auth.
 
 ### [LOW] D5 — Default-admin creation race; non-rotating admin password — ✅ *Resolved*
@@ -226,10 +227,10 @@ Any single admin can create/revoke CAs, sign CSRs, and now **export CA private k
 ### [MEDIUM] D6 — LDAP admin-group-only config grants every directory user access (NEW)
 In `_map_role` (`auth_service.py:107-111`), the **requester** group is the only required-membership gate. If an admin sets `LDAP_ADMIN_GROUP_DN` but leaves `LDAP_REQUESTER_GROUP_DN` empty — a natural "grant admins only" configuration — a directory user in **neither** group falls through to `return "csr_requester"`, so **anyone who can bind to the directory** is auto-provisioned a CSR-requester account on the CA app. **Fix:** treat *any* configured group DN as enabling required membership (deny users matching no mapped group when at least one group is configured); document loudly that "no groups configured = open to all directory users."
 
-### [LOW] D7 — LDAP credential cache masks directory-side changes for up to TTL (NEW)
+### [LOW] D7 — LDAP credential cache masks directory-side changes for up to TTL — ✅ *Accepted (configurable)*
 A Basic-Auth cache hit skips the LDAP bind **and** `_sync_role`; the freshness check re-reads only the local `User` row (`authenticate_basic:229`). So **local** deactivation/deletion/role edits apply immediately (correct), but a **directory-side** password change, disable, or admin-group removal keeps working at the cached DB role for up to `BASIC_AUTH_CACHE_TTL_SECONDS` (default 60). The docstring's "deactivation, role changes … apply immediately" is only true for local-DB changes. **Fix:** correct the docstring; consider not caching admin-role/LDAP entries, or a shorter TTL.
 
-### [LOW] D8 — CSRF fully skipped for Basic Auth incl. browser-cached credentials (NEW)
+### [LOW] D8 — CSRF fully skipped for Basic Auth incl. browser-cached credentials — ✅ *Accepted (deliberate)*
 `ConditionalCSRFProtect.protect` returns early when `g.basic_auth_used` (`extensions.py:18-21`). Correct for curl/scripts, but browsers cache Basic-Auth credentials per-origin and auto-attach them to cross-site state-changing POSTs, setting `basic_auth_used=True` and disabling CSRF for that request. *(Ordering verified correct; session-cookie requests still get CSRF, and `SameSite=Lax` covers the cookie path.)* **Fix:** document that Basic Auth is for non-browser clients only; optionally gate the exemption on a non-browser signal (require a custom header, or exempt only cookie-less requests).
 
 ---
@@ -253,7 +254,7 @@ Only `X-Content-Type-Options`/`X-Frame-Options` are set; no CSP/HSTS/Referrer-Po
 
 ## F. Runtime Security
 
-### [MEDIUM] F1 — Key material not zeroizable; memory-resident — *Carried (mitigated for HSM CAs, v2.0)*
+### [MEDIUM] F1 — Key material not zeroizable; memory-resident — ✅ *Accepted (HSM-mitigated)*
 Decrypted keys and the passphrase are ordinary Python objects (immutable `bytes`/`str`), not wiped after use; they can persist in memory, swap, and core dumps. **Fix:** minimize key lifetime; disable swap/core dumps for the process; prefer an HSM/KMS so plaintext keys never enter the app (A1). **Mitigated (v2.0):** for **HSM-backed CAs** (A1) the signing key stays in the PKCS#11 token and never enters Python memory/swap/core dumps; this finding now applies only to *software*-backed CA keys and the leaf keys the server escrows (A5).
 
 ### [MEDIUM] F2 — Debug mode exposes the Werkzeug debugger and bypasses the insecure-default guard — ✅ *Mitigated*
@@ -266,7 +267,7 @@ Decrypted keys and the passphrase are ordinary Python objects (immutable `bytes`
 
 ## G. Logging, Monitoring & Audit Integrity
 
-### [MEDIUM] G1 — Audit log not tamper-evident; no anomaly alerting — *Carried*
+### [MEDIUM] G1 — Audit log not tamper-evident; no anomaly alerting — ✅ *Accepted (DB-access-controlled)*
 `audit_logs` rows are plain, mutable SQLite; anyone with DB/app write access can alter history, and there is no external retention or alerting on high-risk actions (key export, CA revoke, role change). **Fix:** hash-chain or sign entries; ship to an external append-only store; alert on high-risk actions.
 
 ### [LOW] G2 — `remote_addr` without `ProxyFix` — *Carried*
@@ -294,7 +295,7 @@ Top-level versions use `==` (and are all current-latest — see Positives), but 
 ### [LOW-MEDIUM] I2 — No SCA/vulnerability scanning in CI — ✅ *Resolved (CI supply-chain hardening)*
 The workflow builds/pushes with no `pip-audit`/OSV/Trivy gate. **Fix:** add `pip-audit`/OSV-Scanner + Trivy; fail on high/critical; schedule periodic re-scans.
 
-### [LOW] I3 — `ldap3` is at latest but dormant (NEW)
+### [LOW] I3 — `ldap3` is at latest but dormant — ✅ *Accepted (monitor)*
 `ldap3==2.9.1` is genuinely the newest published release, so it is not "outdated" — but the project has shipped nothing since 2021 and will not receive security patches. Usage is otherwise well-hardened. **Fix:** accept with awareness; monitor for a maintained fork; keep `pyasn1` on a known-good pin.
 
 ---
