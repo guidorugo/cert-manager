@@ -21,6 +21,9 @@ class User(UserMixin, db.Model):
     is_active_user = db.Column(db.Boolean, nullable=False, default=True)
     auth_source = db.Column(db.String(10), nullable=False, default="local")
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    # D1: brute-force lockout for local accounts.
+    failed_login_count = db.Column(db.Integer, nullable=False, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
 
     @property
     def is_active(self):

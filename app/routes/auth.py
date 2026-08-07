@@ -64,6 +64,8 @@ def login():
 
         if result.reason == auth_service.REASON_DEACTIVATED:
             flash("Your account has been deactivated.", "danger")
+        elif result.reason == auth_service.REASON_LOCKED:
+            flash("Too many failed attempts — this account is temporarily locked. Try again later.", "danger")
         elif result.reason == auth_service.REASON_LDAP_UNREACHABLE:
             flash("Directory service is unavailable. Try again later or use a local account.", "danger")
         else:
