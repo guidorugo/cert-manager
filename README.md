@@ -76,6 +76,20 @@ export MASTER_PASSPHRASE=dev-passphrase
 flask --app "app:create_app()" run --debug
 ```
 
+## Running behind TLS (production)
+
+The app serves plain HTTP; **terminate TLS with a reverse proxy** (finding E1). A ready-to-use Caddy example is in `deploy/`:
+
+```bash
+# 1. Set your hostname (a LAN-only name? see deploy/Caddyfile -> `tls internal`)
+echo "PUBLIC_HOSTNAME=ca.example.com" >> .env
+
+# 2. Bring it up: Caddy terminates HTTPS on 443; the app no longer exposes 5000
+docker compose -f docker-compose.yml -f deploy/docker-compose.tls.yml up -d --build
+```
+
+The overlay enables `SESSION_COOKIE_SECURE=true`, `OCSP_URL_SCHEME=https`, `TRUSTED_PROXY_COUNT=1`, and pins `SERVER_NAME_FOR_OCSP` to your hostname (so issued certs' OCSP/CRL URLs are correct — see C4). For a public DNS name Caddy provisions a Let's Encrypt certificate automatically; for a LAN-only name, uncomment `tls internal` in `deploy/Caddyfile` for Caddy's self-signed CA.
+
 ## Usage
 
 ### 1. Create a Root CA

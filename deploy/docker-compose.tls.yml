@@ -1,0 +1,39 @@
+# TLS overlay (finding E1): puts Caddy in front of cert-manager, terminating
+# HTTPS, so credentials/cookies/keys never traverse the network in cleartext.
+#
+# Usage (set PUBLIC_HOSTNAME in .env first):
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.tls.yml up -d --build
+#
+# Requires Docker Compose v2.24+ for `!reset` (to drop the app's host port so it
+# is reachable ONLY through the proxy). On older Compose, delete the app `ports`
+# entry in docker-compose.yml instead.
+services:
+  app:
+    # Reachable only via the proxy network — no direct host port (would bypass TLS).
+    ports: !reset []
+    environment:
+      # Behind a single TLS-terminating proxy: secure cookies, HTTPS OCSP/CRL
+      # URLs, trust one proxy hop, and pin the cert URL hostname (C4).
+      - SESSION_COOKIE_SECURE=true
+      - OCSP_URL_SCHEME=https
+      - TRUSTED_PROXY_COUNT=1
+      - SERVER_NAME_FOR_OCSP=${PUBLIC_HOSTNAME:?set PUBLIC_HOSTNAME to your TLS hostname}
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - PUBLIC_HOSTNAME=${PUBLIC_HOSTNAME:?set PUBLIC_HOSTNAME to your TLS hostname}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

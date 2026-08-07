@@ -91,7 +91,7 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | D6 | Medium | ✅ **Resolved** | LDAP: configuring only the admin group grants **every** directory user a `csr_requester` account | AuthZ |
 | D7 | Low | **NEW** | LDAP: credential cache masks directory-side password/disable/role changes for up to TTL | AuthN |
 | D8 | Low | **NEW** | CSRF fully skipped for Basic Auth — browser-cached credentials enable CSRF | AuthN |
-| E1 | **High** | Carried | No TLS in shipped stack; secure-cookie/OCSP-scheme default insecure | Transit |
+| E1 | **High** | ✅ **Mitigated** | Turnkey **Caddy reverse-proxy TLS example** in `deploy/` (HTTPS + secure cookies + HTTPS OCSP/CRL); default compose stays plain-HTTP for dev | Transit |
 | E2 | Low | ✅ **Resolved** | Runtime CDN dependency; no CSP (SRI present); inline theme script needs nonce under CSP | Transit |
 | E3 | Medium | ✅ **Resolved** | Startup **refuses cleartext `ldap://`** (no ldaps/StartTLS) unless `LDAP_ALLOW_PLAINTEXT=true` | Transit |
 | F1 | Medium | Carried | Key material not zeroizable; resident in memory/swap/core dumps | Runtime |
@@ -118,7 +118,8 @@ Counts: **1 Critical, 8 High, 20 Medium, 12 Low/Low-Med** across 41 findings. A 
 - **CI supply-chain hardening:** **J1** (CI actions SHA-pinned), **H2** (base image digest-pinned + Trivy image scan), **I1** (deps hash-locked via `--require-hashes`), **I2** (pip-audit + Trivy with a weekly cron), **J2** (release images cosign-signed + SLSA provenance + SBOM); pins bumped by Dependabot.
 - **Auth/runtime quick-wins:** **E3** (startup refuses cleartext LDAP), **F2** (debug mode warns loudly instead of silently skipping the insecure-default guard), **D2** (role migration defaults to least-privilege), **D5** (default-admin seed race guarded), **F3** (atomic CRL-number increment), **C4** (documented — pin `SERVER_NAME_FOR_OCSP` in production).
 - **H1 (non-root container):** gunicorn drops to a non-root `app` user (uid 1000) via a privilege-drop entrypoint; `cap_drop: [ALL]` + `no-new-privileges`. Verified live (data/HSM/DB writes intact).
-- **Headline still-open:** the rest of **A7** for *software*-backed CAs (unencrypted key PEM **at rest**, dual control) — *transport is a deployment responsibility met by the required reverse proxy (see A7/E1)*; and **E1** (the shipped compose still ships no TLS proxy). *(A1 resolved in v2.0.)*
+- **E1 (TLS):** a turnkey **Caddy reverse-proxy TLS example** ships in `deploy/` (HTTPS + secure cookies + HTTPS OCSP/CRL, app port dropped); the default compose stays plain-HTTP for local/dev.
+- **Headline still-open:** only the **A7** app-level residual for *software*-backed CAs (the key still leaves as unencrypted PEM at rest; no dual control) — transport is handled by the reverse proxy, and HSM CAs are non-exportable. *(A1 resolved in v2.0.)*
 
 ---
 
@@ -235,10 +236,12 @@ A Basic-Auth cache hit skips the LDAP bind **and** `_sync_role`; the freshness c
 
 ## E. Data in Transit
 
-### [HIGH] E1 — No TLS in the shipped stack; secure-transport defaults insecure — *Carried*
+### [HIGH] E1 — No TLS in the shipped stack; secure-transport defaults insecure — ✅ *Mitigated (turnkey reverse-proxy TLS example)*
 Gunicorn binds plain HTTP `0.0.0.0:5000`; compose publishes `5000:5000` with no TLS terminator. `SESSION_COOKIE_SECURE` defaults false and `OCSP_URL_SCHEME` defaults `http`. As delivered, session cookies, Basic-Auth credentials, imported/exported private keys (A7), and LDAP-derived sessions traverse the network unencrypted. **Fix:** ship/require a TLS-terminating proxy; default `SESSION_COOKIE_SECURE=true` and `OCSP_URL_SCHEME=https` for production; add HSTS; refuse Basic Auth (and key export) without HTTPS.
 
-**Deployment note:** TLS is **by design the reverse proxy's responsibility** — the app is intended to run behind nginx/apache terminating SSL, and `SESSION_COOKIE_SECURE` / `TRUSTED_PROXY_COUNT` exist for exactly that topology (L1/G2). The residual is that the *shipped* compose includes no proxy and defaults to plain HTTP, so an operator who deploys it as-is (without a proxy) is unprotected — hence this stays a documented deployment requirement rather than an app-code fix.
+**Deployment note:** TLS is **by design the reverse proxy's responsibility** — the app is intended to run behind nginx/apache terminating SSL, and `SESSION_COOKIE_SECURE` / `TRUSTED_PROXY_COUNT` exist for exactly that topology (L1/G2).
+
+**Mitigated:** a **turnkey TLS example** now ships in `deploy/` — a Caddy reverse proxy (`deploy/Caddyfile`) plus a compose overlay (`deploy/docker-compose.tls.yml`) brought up with `docker compose -f docker-compose.yml -f deploy/docker-compose.tls.yml up -d`. It terminates HTTPS (Let's Encrypt for a public name, `tls internal` for LAN), **drops the app's direct host port** (reachable only via the proxy), and turns on `SESSION_COOKIE_SECURE=true` / `OCSP_URL_SCHEME=https` / `TRUSTED_PROXY_COUNT=1` and pins `SERVER_NAME_FOR_OCSP` (C4). Documented in the README. The residual — the *default* compose still serves plain HTTP for the local/dev case — is why this is Mitigated rather than Resolved: an operator must choose the TLS overlay for production.
 
 ### [LOW] E2 — Runtime CDN dependency; no CSP — *Carried*
 Only `X-Content-Type-Options`/`X-Frame-Options` are set; no CSP/HSTS/Referrer-Policy. SRI on the Bootstrap CDN is correctly present. Note: the new dark-theme inline `<script>` blocks (`base.html`) would require a nonce/hash (not `'unsafe-inline'`) if a strict CSP is added. **Fix:** add CSP/HSTS/Referrer-Policy; self-host Bootstrap; nonce the inline theme scripts.
