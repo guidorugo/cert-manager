@@ -83,7 +83,7 @@ Status legend: **NEW** (new since 2026-07-10) · **Carried** (unchanged) · **Re
 | C3 | Medium | ✅ **Resolved** | Leaf PKCS#12 export password via GET; weak `changeit` default | API |
 | C4 | Low-Med | ✅ **Mitigated** | Host-header trust for issued-cert URLs — documented; **pin `SERVER_NAME_FOR_OCSP`** in production to stop trusting the Host header | API |
 | C5 | Low-Med | ✅ **Resolved** | Open-redirect via backslash in `next` (Werkzeug emits `/\` unencoded) | API |
-| D1 | Medium | Carried | No rate limiting / lockout / MFA on login or Basic Auth | AuthN |
+| D1 | Medium | ✅ **Mitigated** | Per-account **failed-attempt lockout** added (session + Basic Auth); IP rate limiting opt-in (Flask-Limiter); **MFA deferred** | AuthN |
 | D2 | Medium | ✅ **Resolved** | Role migration now defaults to **least-privilege** and promotes only the configured `ADMIN_USERNAME` | AuthZ |
 | D3 | Medium | Carried | Basic Auth default-on over plaintext; failed attempts flood audit; `_burn_hash` CPU amplification | AuthN |
 | D4 | Low | Carried | No multi-party authorization for CA operations (now incl. key export) | AuthZ |
@@ -205,8 +205,10 @@ When `SERVER_NAME_FOR_OCSP` is at its default `localhost:5000` (the **default** 
 
 ## D. Authentication & Authorization
 
-### [MEDIUM] D1 — No rate limiting, lockout, or MFA — *Carried (amplified by LDAP)*
+### [MEDIUM] D1 — No rate limiting, lockout, or MFA — ✅ *Mitigated (lockout added; MFA deferred)*
 Login and Basic Auth have no throttle/lockout; rate limiting is off by default and, when enabled, uses per-worker `memory://`. The credential cache stores only **successful** auths, so every failed guess takes the full path — and with LDAP enabled, each Basic-Auth failure drives a **fresh directory bind** (online guessing + potential directory-side account-lockout DoS). **Fix:** enable rate limiting by default with a shared backend, stricter on `/auth/login` and Basic-Auth; per-account failed-attempt throttling before hitting LDAP; admin MFA; a password policy.
+
+**Mitigated:** `auth_service.authenticate()` now enforces a **DB-backed per-account lockout** for local accounts — after `LOGIN_LOCKOUT_THRESHOLD` (default 5) consecutive failures it locks the account for `LOGIN_LOCKOUT_MINUTES` (default 15), rejecting even the correct password; a success resets the counter. It applies to **both** the session login and Basic Auth (which routes through `authenticate()` on a cache miss), and is DB-backed so it works across gunicorn workers without an external store — the right fit for the single-instance/SQLite deployment. IP-based rate limiting remains **opt-in** via Flask-Limiter (`RATE_LIMIT_ENABLED`); **admin MFA** and a formal password policy are **deferred** (bigger features, lower marginal value for a homelab). *(Lockout covers local accounts; LDAP accounts rely on the directory's own lockout.)*
 
 ### [MEDIUM] D2 — Migration escalates all pre-existing users to admin — ✅ *Resolved*
 `_migrate_schema` runs `ADD COLUMN role ... DEFAULT 'admin'` (`app/__init__.py:240-242`), contradicting the model default `csr_requester`. Any legacy account becomes admin on upgrade, unaudited. *(Real-world impact is limited — pre-role installs only had admins — but it violates fail-safe defaults.)* The new `auth_source DEFAULT 'local'` migration is correct. **Fix:** default the added column to `csr_requester` and promote the known bootstrap admin explicitly; log migration-time assignments.

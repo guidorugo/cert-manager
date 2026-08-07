@@ -335,6 +335,14 @@ def _migrate_schema():
             db.session.execute(text(
                 "ALTER TABLE users ADD COLUMN auth_source VARCHAR(10) NOT NULL DEFAULT 'local'"
             ))
+        if "failed_login_count" not in columns:  # D1
+            db.session.execute(text(
+                "ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0"
+            ))
+        if "locked_until" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE users ADD COLUMN locked_until DATETIME"
+            ))
 
     # Migrate certificate_authorities table
     if "certificate_authorities" in inspector.get_table_names():

@@ -13,6 +13,7 @@ import hmac
 import os
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Optional
 
@@ -29,6 +30,7 @@ REASON_INVALID = "invalid_credentials"
 REASON_DEACTIVATED = "account_deactivated"
 REASON_LDAP_UNREACHABLE = "ldap_unreachable"
 REASON_LDAP_NO_ROLE = "ldap_no_role"
+REASON_LOCKED = "account_locked"
 
 
 @dataclass
@@ -52,10 +54,15 @@ def authenticate(username, password):
 
     # Local accounts authenticate locally only.
     if user is not None and user.auth_source == "local":
+        # D1: reject while the account is in a brute-force lockout window.
+        if _is_locked(user):
+            return AuthResult(user, REASON_LOCKED, "local")
         if not user.check_password(password):
+            _register_failed_attempt(user)
             return AuthResult(None, REASON_INVALID, "local")
         if not user.is_active:
             return AuthResult(user, REASON_DEACTIVATED, "local")
+        _reset_lockout(user)
         return AuthResult(user, None, "local")
 
     if not current_app.config.get("LDAP_ENABLED"):
@@ -90,6 +97,48 @@ def authenticate(username, password):
 def _burn_hash():
     """Equalize response timing when no real hash comparison happens."""
     generate_password_hash("dummy-password")
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _is_locked(user):
+    """True while a brute-force lockout window is active (D1)."""
+    lu = user.locked_until
+    if lu is None:
+        return False
+    if lu.tzinfo is None:  # SQLite stores naive UTC
+        lu = lu.replace(tzinfo=timezone.utc)
+    return lu > _now()
+
+
+def _register_failed_attempt(user):
+    """Count a failed local login and lock the account past the threshold (D1).
+
+    Commits directly (unlike audit logging) so the counter survives the
+    stateless Basic-Auth path and concurrent workers. LOGIN_LOCKOUT_THRESHOLD<=0
+    disables lockout.
+    """
+    threshold = current_app.config.get("LOGIN_LOCKOUT_THRESHOLD", 5)
+    if threshold <= 0:
+        return
+    user.failed_login_count = (user.failed_login_count or 0) + 1
+    if user.failed_login_count >= threshold:
+        minutes = current_app.config.get("LOGIN_LOCKOUT_MINUTES", 15)
+        user.locked_until = _now() + timedelta(minutes=minutes)
+        user.failed_login_count = 0
+    db.session.add(user)
+    db.session.commit()
+
+
+def _reset_lockout(user):
+    """Clear the failure counter / lock on a successful login (D1)."""
+    if user.failed_login_count or user.locked_until:
+        user.failed_login_count = 0
+        user.locked_until = None
+        db.session.add(user)
+        db.session.commit()
 
 
 def _map_role(groups):
