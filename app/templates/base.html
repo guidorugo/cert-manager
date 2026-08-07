@@ -103,6 +103,9 @@
     <footer class="mt-auto py-3 bg-body-tertiary">
         <div class="container text-center text-body-secondary">
             Cert Manager &mdash; <a href="https://github.com/guidorugo/cert-manager" class="text-body-secondary">GitHub</a>
+            {% if app_version %}
+            <br><small class="text-body-secondary">v{{ app_version }}</small>
+            {% endif %}
         </div>
     </footer>
 
