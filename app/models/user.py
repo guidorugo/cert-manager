@@ -24,6 +24,9 @@ class User(UserMixin, db.Model):
     # D1: brute-force lockout for local accounts.
     failed_login_count = db.Column(db.Integer, nullable=False, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
+    # Force a password change on next login (set for the bootstrap admin created
+    # from ADMIN_PASSWORD, so the seed credential can't become permanent).
+    must_change_password = db.Column(db.Boolean, nullable=False, default=False)
 
     @property
     def is_active(self):

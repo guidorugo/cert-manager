@@ -33,6 +33,7 @@ def create_app(config_class=Config):
     _setup_security_headers(app)
     _setup_rate_limiting(app)
     _register_template_context(app)
+    _setup_password_change_guard(app)
 
     from .routes.auth import auth_bp
     from .routes.dashboard import dashboard_bp
@@ -82,6 +83,30 @@ def _register_template_context(app):
             "latest_version": latest_version,
             "update_repo": app.config.get("UPDATE_CHECK_REPO") or "guidorugo/cert-manager",
         }
+
+
+def _setup_password_change_guard(app):
+    """Force a session user flagged ``must_change_password`` to set a new one
+    before using the app (the bootstrap admin). Programmatic Basic Auth clients
+    are exempt (they cannot do an interactive change); public endpoints and the
+    change-password / logout routes stay reachable."""
+    from flask import flash, redirect, url_for
+    from flask_login import current_user
+
+    _ALLOWED = {"auth.change_password", "auth.logout", "static"}
+
+    @app.before_request
+    def _require_password_change():
+        if getattr(g, "basic_auth_used", False):
+            return
+        if request.blueprint == "public" or request.endpoint in _ALLOWED:
+            return
+        if not current_user.is_authenticated:
+            return
+        if not getattr(current_user, "must_change_password", False):
+            return
+        flash("Please set a new password before continuing.", "warning")
+        return redirect(url_for("auth.change_password"))
 
 
 def _setup_basic_auth(app):
@@ -366,6 +391,10 @@ def _migrate_schema():
             db.session.execute(text(
                 "ALTER TABLE users ADD COLUMN locked_until DATETIME"
             ))
+        if "must_change_password" not in columns:
+            db.session.execute(text(
+                "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT 0"
+            ))
 
     # Migrate certificate_authorities table
     if "certificate_authorities" in inspector.get_table_names():
@@ -429,6 +458,9 @@ def _create_default_admin(app):
         return
     admin = User(username=app.config["ADMIN_USERNAME"], role="admin")
     admin.set_password(app.config["ADMIN_PASSWORD"])
+    # The ADMIN_PASSWORD env is a bootstrap seed — force a change on first login
+    # so it cannot silently become the permanent admin password.
+    admin.must_change_password = True
     db.session.add(admin)
     try:
         db.session.commit()
