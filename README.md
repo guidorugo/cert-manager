@@ -58,13 +58,14 @@ You can also use the pre-built image with docker compose by commenting out the `
 **Verify a release image** (signature + provenance/SBOM):
 
 ```bash
-# Verify the keyless cosign signature (signed by the release workflow)
-cosign verify ghcr.io/guidorugo/cert-manager:2.0.1 \
+# Verify the keyless cosign signature (signed by the release workflow).
+# Signatures are stored in the legacy tag format, so any cosign version works.
+cosign verify ghcr.io/guidorugo/cert-manager:2.1.1 \
   --certificate-identity-regexp 'https://github.com/guidorugo/cert-manager/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # Inspect the SLSA provenance / SBOM attestations
-cosign download attestation ghcr.io/guidorugo/cert-manager:2.0.1 | jq .
+cosign download attestation ghcr.io/guidorugo/cert-manager:2.1.1 | jq .
 ```
 
 ### Local Development
