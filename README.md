@@ -202,6 +202,28 @@ curl -u admin:admin -X POST http://localhost:5000/ca/1/crl
 
 Basic Auth works for local and LDAP accounts alike. To keep the per-request cost low, successfully verified credentials are cached in process memory for a short TTL (`BASIC_AUTH_CACHE_TTL_SECONDS`, default 60 seconds; set `0` to disable). A cache hit skips the LDAP bind / password-hash check but still re-reads the user record, so deactivations apply immediately.
 
+#### JSON responses (content negotiation)
+
+Data endpoints return **JSON** when the caller is an API client — it authenticated with **Basic Auth**, or sent **`Accept: application/json`** — and HTML otherwise, so the same URLs back the web UI and a JSON API.
+
+- **Reads** — `GET /ca/`, `/ca/<id>`, `/certificates/`, `/certificates/<id>`, `/csr/`, `/csr/<id>`, `/users/`, `/users/audit-log`, `/` — return the resource(s) as JSON.
+- **Writes** — `POST /ca/create`, `/ca/<id>/revoke`, `/ca/<id>/crl`, `/certificates/create`, `/certificates/<id>/revoke`, `/csr/create`, `/csr/<id>/sign`, `/csr/<id>/reject` — take the same form fields and return the created/updated resource (`201`/`200`); validation and not-found errors return `{"error": "..."}` with a `4xx` status.
+
+```bash
+# Basic Auth implies JSON
+curl -u admin:PASSWORD http://localhost:5000/ca/
+
+# ...or force JSON with an Accept header
+curl -u admin:PASSWORD -H "Accept: application/json" http://localhost:5000/certificates/1
+
+# Create a CA — form fields in, JSON out
+curl -u admin:PASSWORD -H "Accept: application/json" \
+  -d "mode=generate&name=api-root&cn=API Root&key_type=EC&key_size=256&ca_type=root&validity_days=3650" \
+  http://localhost:5000/ca/create
+```
+
+Request bodies stay form-encoded (`-d field=value`); only the *response* is negotiated. Downloads (`/ca/<id>/download`, `/public/...`) always return the certificate/CRL/PKCS#12 bytes, and secret fields (private keys, password hashes) are never included in JSON. User-management writes remain form-based (admin console).
+
 #### Session Cookies (browser / legacy)
 
 Alternatively, authenticate via session cookie:

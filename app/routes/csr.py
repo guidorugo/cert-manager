@@ -3,7 +3,7 @@ import logging
 
 from flask import (
     Blueprint, render_template, redirect, url_for, flash,
-    request, current_app, Response,
+    request, current_app, Response, jsonify,
 )
 from flask_login import login_required, current_user
 
@@ -11,6 +11,7 @@ from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.csr import CertificateSigningRequest
+from ..responses import api_error, wants_json
 from ..services import csr_service, cert_service, audit_service
 
 logger = logging.getLogger(__name__)
@@ -29,29 +30,38 @@ def list_csrs():
         csrs = CertificateSigningRequest.query.filter_by(
             created_by=current_user.id
         ).order_by(CertificateSigningRequest.created_at.desc()).all()
+    if wants_json():
+        return jsonify([c.to_dict() for c in csrs])
     return render_template("csr/list.html", csrs=csrs)
 
 
 @csr_bp.route("/create", methods=["GET", "POST"])
 @login_required
 def create():
+    def _err(message, status=400):
+        if wants_json():
+            return api_error(message, status)
+        flash(message, "danger")
+        return render_template("csr/create.html")
+
     if request.method == "POST":
         mode = request.form.get("mode", "generate")
 
         if mode == "upload":
             csr_pem = request.form.get("csr_pem", "").strip()
             if not csr_pem:
-                flash("CSR PEM data is required.", "danger")
-                return render_template("csr/create.html")
+                return _err("CSR PEM data is required.")
             try:
                 csr_model = csr_service.import_csr(csr_pem, created_by=current_user.id)
                 audit_service.log_action("import_csr", target_type="csr", target_id=csr_model.id)
                 db.session.commit()
+                if wants_json():
+                    return jsonify(csr_model.to_dict(detail=True)), 201
                 flash(f"CSR for '{csr_model.common_name}' imported.", "success")
                 return redirect(url_for("csr.detail", csr_id=csr_model.id))
-            except Exception as e:
+            except Exception:
                 logger.exception("Error importing CSR")
-                flash("An unexpected error occurred while importing the CSR.", "danger")
+                return _err("An unexpected error occurred while importing the CSR.", 500)
         else:
             cn = request.form.get("cn", "").strip()
             org = request.form.get("org", "").strip()
@@ -65,12 +75,10 @@ def create():
             try:
                 key_size = int(request.form.get("key_size", "2048"))
             except ValueError:
-                flash("Key size must be a valid number.", "danger")
-                return render_template("csr/create.html")
+                return _err("Key size must be a valid number.")
 
             if not cn:
-                flash("Common Name is required.", "danger")
-                return render_template("csr/create.html")
+                return _err("Common Name is required.")
 
             subject_attrs = {
                 "CN": cn, "O": org, "OU": ou,
@@ -86,6 +94,11 @@ def create():
                 )
                 audit_service.log_action("create_csr", target_type="csr", target_id=csr_model.id)
                 db.session.commit()
+                if wants_json():
+                    # The private key is returned once here — it is never stored.
+                    payload = csr_model.to_dict(detail=True)
+                    payload["private_key_pem"] = key_pem.decode() if key_pem else None
+                    return jsonify(payload), 201
                 flash(
                     f"CSR for '{csr_model.common_name}' created. "
                     "Download the private key now - it won't be stored.",
@@ -95,9 +108,9 @@ def create():
                     "csr/detail.html", csr=csr_model,
                     key_pem=key_pem.decode() if key_pem else None,
                 )
-            except Exception as e:
+            except Exception:
                 logger.exception("Error creating CSR")
-                flash("An unexpected error occurred while creating the CSR.", "danger")
+                return _err("An unexpected error occurred while creating the CSR.", 500)
 
     return render_template("csr/create.html")
 
@@ -107,12 +120,19 @@ def create():
 def detail(csr_id):
     csr_model = db.session.get(CertificateSigningRequest, csr_id)
     if not csr_model:
+        if wants_json():
+            return api_error("CSR not found.", 404)
         flash("CSR not found.", "danger")
         return redirect(url_for("csr.list_csrs"))
 
     if not current_user.is_admin and csr_model.created_by != current_user.id:
+        if wants_json():
+            return api_error("You do not have permission to view this CSR.", 403)
         flash("You do not have permission to view this CSR.", "danger")
         return redirect(url_for("csr.list_csrs"))
+
+    if wants_json():
+        return jsonify(csr_model.to_dict(detail=True))
 
     san_list = json.loads(csr_model.san_json) if csr_model.san_json else []
     return render_template("csr/detail.html", csr=csr_model, san_list=san_list)
@@ -123,10 +143,14 @@ def detail(csr_id):
 def sign(csr_id):
     csr_model = db.session.get(CertificateSigningRequest, csr_id)
     if not csr_model:
+        if wants_json():
+            return api_error("CSR not found.", 404)
         flash("CSR not found.", "danger")
         return redirect(url_for("csr.list_csrs"))
 
     if csr_model.status != "pending":
+        if wants_json():
+            return api_error("This CSR has already been processed.", 409)
         flash("This CSR has already been processed.", "warning")
         return redirect(url_for("csr.detail", csr_id=csr_id))
 
@@ -136,27 +160,26 @@ def sign(csr_id):
             ocsp_server = request.host
         ocsp_scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
 
+        def _err(message, status=400):
+            if wants_json():
+                return api_error(message, status)
+            flash(message, "danger")
+            return render_template("csr/sign.html", csr=csr_model,
+                                   cas=CertificateAuthority.signing_capable().all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+
         try:
             ca_id = int(request.form.get("ca_id"))
             validity_days = int(request.form.get("validity_days", "365"))
         except (ValueError, TypeError):
-            flash("CA ID and validity days must be valid numbers.", "danger")
-            return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.signing_capable().all(),
-                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+            return _err("CA ID and validity days must be valid numbers.")
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
-            flash("CA not found.", "danger")
-            return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.signing_capable().all(),
-                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+            return _err("CA not found.", 404)
 
         if ca.is_revoked:
-            flash("Cannot sign CSR with a revoked CA.", "danger")
-            return render_template("csr/sign.html", csr=csr_model,
-                                   cas=CertificateAuthority.signing_capable().all(),
-                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+            return _err("Cannot sign CSR with a revoked CA.")
 
         passphrase = current_app.config["MASTER_PASSPHRASE"]
 
@@ -186,10 +209,7 @@ def sign(csr_id):
                 "key_agreement": "ku_key_agreement" in request.form,
             }
             if not any(key_usage.values()):
-                flash("At least one Key Usage must be selected.", "danger")
-                return render_template("csr/sign.html", csr=csr_model,
-                                       cas=CertificateAuthority.signing_capable().all(),
-                                       ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+                return _err("At least one Key Usage must be selected.")
 
         if has_eku_fields:
             eku_names = ["serverAuth", "clientAuth", "codeSigning",
@@ -206,11 +226,13 @@ def sign(csr_id):
             audit_service.log_action("sign_csr", target_type="csr", target_id=csr_id,
                                      details={"certificate_id": certificate.id})
             db.session.commit()
+            if wants_json():
+                return jsonify(certificate.to_dict(detail=True)), 201
             flash(f"Certificate '{certificate.common_name}' issued.", "success")
             return redirect(url_for("certificates.detail", cert_id=certificate.id))
-        except Exception as e:
+        except Exception:
             logger.exception("Error signing CSR")
-            flash("An unexpected error occurred while signing the CSR.", "danger")
+            return _err("An unexpected error occurred while signing the CSR.", 500)
 
     cas = CertificateAuthority.signing_capable().all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
@@ -226,11 +248,15 @@ def sign(csr_id):
 def reject(csr_id):
     csr_model = db.session.get(CertificateSigningRequest, csr_id)
     if not csr_model:
+        if wants_json():
+            return api_error("CSR not found.", 404)
         flash("CSR not found.", "danger")
         return redirect(url_for("csr.list_csrs"))
 
     csr_model.status = "rejected"
     audit_service.log_action("reject_csr", target_type="csr", target_id=csr_id)
     db.session.commit()
+    if wants_json():
+        return jsonify(csr_model.to_dict(detail=True))
     flash(f"CSR for '{csr_model.common_name}' rejected.", "info")
     return redirect(url_for("csr.list_csrs"))

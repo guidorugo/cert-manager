@@ -4,7 +4,7 @@ import re
 
 from flask import (
     Blueprint, render_template, redirect, url_for, flash,
-    request, current_app, Response,
+    request, current_app, Response, jsonify,
 )
 from flask_login import login_required, current_user
 
@@ -12,6 +12,7 @@ from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
 from ..models.certificate import Certificate
+from ..responses import api_error, wants_json
 from ..services import cert_service, crl_service, audit_service
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ def list_certs():
         certs = Certificate.query.filter_by(
             requested_by=current_user.id
         ).order_by(Certificate.created_at.desc()).all()
+    if wants_json():
+        return jsonify([c.to_dict() for c in certs])
     return render_template("certificates/list.html", certs=certs)
 
 
@@ -54,35 +57,31 @@ def create():
             ocsp_server = request.host
         ocsp_scheme = current_app.config.get("OCSP_URL_SCHEME", "http")
 
+        def _err(message, status=400):
+            if wants_json():
+                return api_error(message, status)
+            flash(message, "danger")
+            return render_template("certificates/create.html",
+                                   cas=CertificateAuthority.signing_capable().all(),
+                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+
         try:
             ca_id = int(request.form.get("ca_id"))
             key_size = int(request.form.get("key_size", "2048"))
             validity_days = int(request.form.get("validity_days", "365"))
         except (ValueError, TypeError):
-            flash("CA ID, key size, and validity days must be valid numbers.", "danger")
-            return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.signing_capable().all(),
-                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+            return _err("CA ID, key size, and validity days must be valid numbers.")
         san_raw = request.form.get("san", "").strip()
 
         if not cn:
-            flash("Common Name is required.", "danger")
-            return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.signing_capable().all(),
-                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+            return _err("Common Name is required.")
 
         ca = db.session.get(CertificateAuthority, ca_id)
         if not ca:
-            flash("CA not found.", "danger")
-            return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.signing_capable().all(),
-                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+            return _err("CA not found.", 404)
 
         if ca.is_revoked:
-            flash("Cannot issue certificates from a revoked CA.", "danger")
-            return render_template("certificates/create.html",
-                                   cas=CertificateAuthority.signing_capable().all(),
-                                   ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+            return _err("Cannot issue certificates from a revoked CA.")
 
         subject_attrs = {
             "CN": cn, "O": org, "OU": ou,
@@ -118,10 +117,7 @@ def create():
                 "key_agreement": "ku_key_agreement" in request.form,
             }
             if not any(key_usage.values()):
-                flash("At least one Key Usage must be selected.", "danger")
-                cas = CertificateAuthority.signing_capable().all()
-                return render_template("certificates/create.html", cas=cas,
-                                       ocsp_scheme=ocsp_scheme, ocsp_server=ocsp_server)
+                return _err("At least one Key Usage must be selected.")
 
         if has_eku_fields:
             eku_names = ["serverAuth", "clientAuth", "codeSigning",
@@ -138,11 +134,13 @@ def create():
             )
             audit_service.log_action("create_certificate", target_type="certificate", target_id=certificate.id)
             db.session.commit()
+            if wants_json():
+                return jsonify(certificate.to_dict(detail=True)), 201
             flash(f"Certificate '{certificate.common_name}' created.", "success")
             return redirect(url_for("certificates.detail", cert_id=certificate.id))
-        except Exception as e:
+        except Exception:
             logger.exception("Error creating certificate")
-            flash("An unexpected error occurred while creating the certificate.", "danger")
+            return _err("An unexpected error occurred while creating the certificate.", 500)
 
     cas = CertificateAuthority.signing_capable().all()
     server = current_app.config.get("SERVER_NAME_FOR_OCSP", "localhost:5000")
@@ -158,12 +156,19 @@ def create():
 def detail(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
+        if wants_json():
+            return api_error("Certificate not found.", 404)
         flash("Certificate not found.", "danger")
         return redirect(url_for("certificates.list_certs"))
 
     if not current_user.is_admin and certificate.requested_by != current_user.id:
+        if wants_json():
+            return api_error("You do not have permission to view this certificate.", 403)
         flash("You do not have permission to view this certificate.", "danger")
         return redirect(url_for("certificates.list_certs"))
+
+    if wants_json():
+        return jsonify(certificate.to_dict(detail=True))
 
     san_list = json.loads(certificate.san_json) if certificate.san_json else []
 
@@ -193,6 +198,8 @@ def detail(cert_id):
 def revoke(cert_id):
     certificate = db.session.get(Certificate, cert_id)
     if not certificate:
+        if wants_json():
+            return api_error("Certificate not found.", 404)
         flash("Certificate not found.", "danger")
         return redirect(url_for("certificates.list_certs"))
 
@@ -204,10 +211,14 @@ def revoke(cert_id):
             audit_service.log_action("revoke_certificate", target_type="certificate", target_id=cert_id,
                                      details={"reason": reason})
             db.session.commit()
+            if wants_json():
+                return jsonify(certificate.to_dict(detail=True))
             flash(f"Certificate '{certificate.common_name}' revoked.", "success")
             return redirect(url_for("certificates.detail", cert_id=cert_id))
-        except Exception as e:
+        except Exception:
             logger.exception("Error revoking certificate")
+            if wants_json():
+                return api_error("An unexpected error occurred while revoking the certificate.", 500)
             flash("An unexpected error occurred while revoking the certificate.", "danger")
 
     return render_template("certificates/revoke.html", cert=certificate)

@@ -6,6 +6,7 @@ from flask import Blueprint, Response, render_template, redirect, url_for, flash
 from ..decorators import admin_required
 from ..extensions import db
 from ..models.ca import CertificateAuthority
+from ..responses import api_error, wants_json
 from ..services import ca_service, crl_service, audit_service
 from ..services.keybackend import hsm_available
 
@@ -51,20 +52,28 @@ def _create_page_context():
 @admin_required
 def list_cas():
     cas = CertificateAuthority.query.order_by(CertificateAuthority.created_at.desc()).all()
+    if wants_json():
+        return jsonify([ca.to_dict() for ca in cas])
     return render_template("ca/list.html", cas=cas)
 
 
 @ca_bp.route("/create", methods=["GET", "POST"])
 @admin_required
 def create():
+    def _err(message, status=400):
+        # JSON for API clients; re-render the form (with flash) for browsers.
+        if wants_json():
+            return api_error(message, status)
+        flash(message, "danger")
+        return render_template("ca/create.html", **_create_page_context())
+
     if request.method == "POST":
         mode = request.form.get("mode", "generate")
 
         if mode == "upload":
             name = request.form.get("name", "").strip()
             if not name:
-                flash("CA Name is required.", "danger")
-                return render_template("ca/create.html", **_create_page_context())
+                return _err("CA Name is required.")
 
             upload_parent_id = request.form.get("upload_parent_id")
             parent_id = upload_parent_id if upload_parent_id else None
@@ -115,13 +124,15 @@ def create():
                 if not ca.has_private_key:
                     msg += (" Imported without a private key: this CA cannot issue "
                             "certificates, sign CRLs, or answer OCSP.")
+                if wants_json():
+                    return jsonify(ca.to_dict(detail=True)), 201
                 flash(msg, "success" if ca.has_private_key else "warning")
                 return redirect(url_for("ca.detail", ca_id=ca.id))
             except ValueError as e:
-                flash(str(e), "danger")
+                return _err(str(e))
             except Exception:
                 logger.exception("Error importing CA")
-                flash("An unexpected error occurred while importing the CA.", "danger")
+                return _err("An unexpected error occurred while importing the CA.", 500)
 
         else:
             # Generate mode - existing logic
@@ -140,20 +151,17 @@ def create():
             if key_backend not in ("software", "softhsm"):
                 key_backend = "software"
             if key_backend == "softhsm" and not hsm_available():
-                flash("The HSM (SoftHSM) key backend is not configured on this server.", "danger")
-                return render_template("ca/create.html", **_create_page_context())
+                return _err("The HSM (SoftHSM) key backend is not configured on this server.")
 
             try:
                 key_size = int(request.form.get("key_size", "2048"))
                 validity_days = int(request.form.get("validity_days", "3650"))
                 path_length = int(path_length_str) if path_length_str else None
             except ValueError:
-                flash("Key size, validity days, and path length must be valid numbers.", "danger")
-                return render_template("ca/create.html", **_create_page_context())
+                return _err("Key size, validity days, and path length must be valid numbers.")
 
             if not name or not cn:
-                flash("Name and Common Name are required.", "danger")
-                return render_template("ca/create.html", **_create_page_context())
+                return _err("Name and Common Name are required.")
 
             subject_attrs = {
                 "CN": cn, "O": org, "OU": ou,
@@ -166,12 +174,10 @@ def create():
                     try:
                         parent_ca_id = int(parent_id)
                     except ValueError:
-                        flash("Invalid parent CA ID.", "danger")
-                        return render_template("ca/create.html", **_create_page_context())
+                        return _err("Invalid parent CA ID.")
                     parent_ca = db.session.get(CertificateAuthority, parent_ca_id)
                     if not parent_ca:
-                        flash("Parent CA not found.", "danger")
-                        return render_template("ca/create.html", **_create_page_context())
+                        return _err("Parent CA not found.")
                     ca = ca_service.create_intermediate_ca(
                         name, parent_ca, subject_attrs, key_type, key_size,
                         validity_days, passphrase, path_length=path_length,
@@ -185,11 +191,13 @@ def create():
                     )
                 audit_service.log_action("create_ca", target_type="ca", target_id=ca.id)
                 db.session.commit()
+                if wants_json():
+                    return jsonify(ca.to_dict(detail=True)), 201
                 flash(f"CA '{ca.name}' created successfully.", "success")
                 return redirect(url_for("ca.detail", ca_id=ca.id))
-            except Exception as e:
+            except Exception:
                 logger.exception("Error creating CA")
-                flash("An unexpected error occurred while creating the CA.", "danger")
+                return _err("An unexpected error occurred while creating the CA.", 500)
 
     return render_template("ca/create.html", **_create_page_context())
 
@@ -210,8 +218,12 @@ def detect_parent():
 def detail(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
+        if wants_json():
+            return api_error("CA not found.", 404)
         flash("CA not found.", "danger")
         return redirect(url_for("ca.list_cas"))
+    if wants_json():
+        return jsonify(ca.to_dict(detail=True))
     chain = ca_service.get_ca_chain(ca)
     return render_template("ca/detail.html", ca=ca, chain=chain)
 
@@ -291,10 +303,14 @@ def download(ca_id):
 def revoke(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
+        if wants_json():
+            return api_error("CA not found.", 404)
         flash("CA not found.", "danger")
         return redirect(url_for("ca.list_cas"))
 
     if ca.is_revoked:
+        if wants_json():
+            return api_error("CA is already revoked.", 409)
         flash("CA is already revoked.", "warning")
         return redirect(url_for("ca.detail", ca_id=ca.id))
 
@@ -312,10 +328,14 @@ def revoke(ca_id):
                 msg += f" {certs_revoked} certificate(s) revoked."
             if sub_cas_revoked:
                 msg += f" {sub_cas_revoked} sub-CA(s) revoked."
+            if wants_json():
+                return jsonify(ca.to_dict(detail=True))
             flash(msg, "success")
             return redirect(url_for("ca.detail", ca_id=ca.id))
-        except Exception as e:
+        except Exception:
             logger.exception("Error revoking CA")
+            if wants_json():
+                return api_error("An unexpected error occurred while revoking the CA.", 500)
             flash("An unexpected error occurred while revoking the CA.", "danger")
 
     # Count affected items for the confirmation page
@@ -340,10 +360,14 @@ def _count_active_sub_cas(ca):
 def generate_crl(ca_id):
     ca = db.session.get(CertificateAuthority, ca_id)
     if not ca:
+        if wants_json():
+            return api_error("CA not found.", 404)
         flash("CA not found.", "danger")
         return redirect(url_for("ca.list_cas"))
 
     if ca.is_revoked:
+        if wants_json():
+            return api_error("Cannot generate CRL for a revoked CA.", 400)
         flash("Cannot generate CRL for a revoked CA.", "danger")
         return redirect(url_for("ca.detail", ca_id=ca.id))
 
@@ -352,11 +376,17 @@ def generate_crl(ca_id):
         crl_service.generate_crl(ca, passphrase)
         audit_service.log_action("generate_crl", target_type="ca", target_id=ca.id)
         db.session.commit()
+        if wants_json():
+            return jsonify(ca.to_dict(detail=True))
         flash(f"CRL #{ca.crl_number} generated successfully.", "success")
     except ValueError as e:
+        if wants_json():
+            return api_error(str(e), 400)
         flash(str(e), "danger")
     except Exception:
         logger.exception("Error generating CRL")
+        if wants_json():
+            return api_error("An unexpected error occurred while generating the CRL.", 500)
         flash("An unexpected error occurred while generating the CRL.", "danger")
 
     return redirect(url_for("ca.detail", ca_id=ca.id))

@@ -1,9 +1,10 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, jsonify
 from flask_login import login_required, current_user
 
 from ..models.ca import CertificateAuthority
 from ..models.certificate import Certificate
 from ..models.csr import CertificateSigningRequest
+from ..responses import wants_json
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -22,6 +23,12 @@ def index():
         }
         recent_certs = Certificate.query.order_by(Certificate.created_at.desc()).limit(5).all()
         recent_cas = CertificateAuthority.query.order_by(CertificateAuthority.created_at.desc()).limit(5).all()
+        if wants_json():
+            return jsonify({
+                "stats": stats,
+                "recent_cas": [ca.to_dict() for ca in recent_cas],
+                "recent_certs": [c.to_dict() for c in recent_certs],
+            })
         return render_template("dashboard.html", stats=stats, recent_certs=recent_certs, recent_cas=recent_cas)
     else:
         stats = {
@@ -38,4 +45,9 @@ def index():
         recent_csrs = CertificateSigningRequest.query.filter_by(
             created_by=current_user.id
         ).order_by(CertificateSigningRequest.created_at.desc()).limit(5).all()
+        if wants_json():
+            return jsonify({
+                "stats": stats,
+                "recent_csrs": [c.to_dict() for c in recent_csrs],
+            })
         return render_template("dashboard.html", stats=stats, recent_csrs=recent_csrs)

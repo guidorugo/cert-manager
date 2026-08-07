@@ -5,6 +5,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from ..extensions import db, login_manager
+from ..serialization import iso
 
 # Sentinel stored in password_hash for externally-authenticated (LDAP) users.
 # Never a valid werkzeug hash, and check_password() short-circuits on it.
@@ -58,6 +59,18 @@ class User(UserMixin, db.Model):
         if not self.has_usable_password():
             return False
         return check_password_hash(self.password_hash, password)
+
+    def to_dict(self):
+        # Never expose password_hash.
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "is_active": self.is_active_user,
+            "auth_source": self.auth_source,
+            "must_change_password": self.must_change_password,
+            "created_at": iso(self.created_at),
+        }
 
     def __repr__(self):
         return f"<User {self.username}>"

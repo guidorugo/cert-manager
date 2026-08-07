@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from ..extensions import db
+from ..serialization import iso, json_or_none
 
 
 class Certificate(db.Model):
@@ -27,6 +28,32 @@ class Certificate(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     requester = db.relationship("User", backref="certificates", foreign_keys=[requested_by])
+
+    def to_dict(self, detail=False):
+        d = {
+            "id": self.id,
+            "serial_number": self.serial_number,
+            "common_name": self.common_name,
+            "ca_id": self.ca_id,
+            "key_type": self.key_type,
+            "key_size": self.key_size,
+            "not_before": iso(self.not_before),
+            "not_after": iso(self.not_after),
+            "is_revoked": self.is_revoked,
+            "requested_by": self.requested_by,
+            "created_at": iso(self.created_at),
+        }
+        if detail:
+            d.update({
+                "subject": json_or_none(self.subject_json),
+                "sans": json_or_none(self.san_json),
+                "key_usage": json_or_none(self.key_usage_json),
+                "extended_key_usage": json_or_none(self.extended_key_usage_json),
+                "revoked_at": iso(self.revoked_at),
+                "revocation_reason": self.revocation_reason,
+                "certificate_pem": self.certificate_pem,
+            })
+        return d
 
     def __repr__(self):
         return f"<Certificate {self.common_name} ({self.serial_number})>"

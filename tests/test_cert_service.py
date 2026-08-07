@@ -252,7 +252,8 @@ def test_api_create_cert_without_ku_eku_uses_defaults(app, client, admin_user, d
             "key_size": "2048",
         }, headers=_basic_auth_headers("testadmin", "adminpass"),
            follow_redirects=True)
-        assert resp.status_code == 200
+        # Basic Auth is an API client, so create/sign returns 201 JSON.
+        assert resp.status_code == 201
 
         cert = Certificate.query.filter_by(common_name="api-default.example.com").first()
         assert cert is not None
@@ -280,7 +281,8 @@ def test_api_create_cert_with_custom_ku_eku(app, client, admin_user, db):
             "eku_codeSigning": "on",
         }, headers=_basic_auth_headers("testadmin", "adminpass"),
            follow_redirects=True)
-        assert resp.status_code == 200
+        # Basic Auth is an API client, so create/sign returns 201 JSON.
+        assert resp.status_code == 201
 
         cert = Certificate.query.filter_by(common_name="api-custom.example.com").first()
         assert cert is not None
@@ -307,7 +309,8 @@ def test_api_sign_csr_without_ku_eku_uses_defaults(app, client, admin_user, db):
             "validity_days": "365",
         }, headers=_basic_auth_headers("testadmin", "adminpass"),
            follow_redirects=True)
-        assert resp.status_code == 200
+        # Basic Auth is an API client, so create/sign returns 201 JSON.
+        assert resp.status_code == 201
 
         cert = Certificate.query.filter_by(common_name="api-csr.example.com").first()
         assert cert is not None
