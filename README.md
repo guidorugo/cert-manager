@@ -26,15 +26,25 @@ A web-based X.509 Certificate Authority management application built with Python
 ### Docker (recommended)
 
 ```bash
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your settings
+# 1. Generate local secrets + .env (master passphrase, a strong SECRET_KEY, and
+#    a random admin password). Safe to re-run — it never overwrites existing
+#    values. Add --hsm to also create SoftHSM PIN secrets.
+./scripts/init-secrets.sh
 
-# Build and run
+# 2. (Optional) review .env for other settings, then build and run
 docker compose up --build
 ```
 
-Navigate to `http://localhost:5000` and log in with the default credentials (admin/admin).
+The script prints the generated admin password (also saved as `ADMIN_PASSWORD`
+in `.env`). Open `http://localhost:5000`, log in as `admin` with that password,
+and change it after first login. The app **refuses to start** with the shipped
+placeholder credentials, so this bootstrap step is required — a bare
+`docker compose up` on a fresh clone fails on the missing
+`secrets/master_passphrase` mount.
+
+> **Back up `secrets/master_passphrase`.** It encrypts every CA private key — if
+> you lose it, the keys are unrecoverable. Keep the same value across restarts
+> and any hosts that share the data volume.
 
 ### Pre-built Image (GHCR)
 
