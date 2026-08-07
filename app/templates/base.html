@@ -69,6 +69,11 @@
                             {% endif %}
                         </span>
                     </li>
+                    {% if current_user.has_usable_password() %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('auth.change_password') }}">Change Password</a>
+                    </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a>
                     </li>

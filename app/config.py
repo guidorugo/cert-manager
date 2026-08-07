@@ -84,6 +84,10 @@ class Config:
     LOGIN_LOCKOUT_THRESHOLD = int(os.environ.get("LOGIN_LOCKOUT_THRESHOLD") or "5")
     LOGIN_LOCKOUT_MINUTES = int(os.environ.get("LOGIN_LOCKOUT_MINUTES") or "15")
 
+    # Minimum length enforced when a user sets a new password via the
+    # change-password page (incl. the forced first-login change).
+    MIN_PASSWORD_LENGTH = int(os.environ.get("MIN_PASSWORD_LENGTH") or "12")
+
     # Opt-in "newer release available?" check shown in the footer. Off by
     # default so a hardened / air-gapped CA never makes an outbound call. When
     # on, the latest GitHub release tag is fetched at most once per interval
