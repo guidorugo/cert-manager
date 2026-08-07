@@ -105,6 +105,12 @@
             Cert Manager &mdash; <a href="https://github.com/guidorugo/cert-manager" class="text-body-secondary">GitHub</a>
             {% if app_version %}
             <br><small class="text-body-secondary">v{{ app_version }}</small>
+            {% if update_available %}
+            <a class="badge text-bg-warning text-decoration-none ms-1" role="button"
+               href="https://github.com/{{ update_repo }}/releases/latest"
+               target="_blank" rel="noopener noreferrer"
+               title="A newer release is available on GitHub">Update available{% if latest_version %} ({{ latest_version }}){% endif %}</a>
+            {% endif %}
             {% endif %}
         </div>
     </footer>

@@ -84,6 +84,15 @@ class Config:
     LOGIN_LOCKOUT_THRESHOLD = int(os.environ.get("LOGIN_LOCKOUT_THRESHOLD") or "5")
     LOGIN_LOCKOUT_MINUTES = int(os.environ.get("LOGIN_LOCKOUT_MINUTES") or "15")
 
+    # Opt-in "newer release available?" check shown in the footer. Off by
+    # default so a hardened / air-gapped CA never makes an outbound call. When
+    # on, the latest GitHub release tag is fetched at most once per interval
+    # (server-side, cached, non-blocking) and compared to the running version.
+    UPDATE_CHECK_ENABLED = os.environ.get("UPDATE_CHECK_ENABLED", "false").lower() == "true"
+    UPDATE_CHECK_REPO = os.environ.get("UPDATE_CHECK_REPO") or "guidorugo/cert-manager"
+    UPDATE_CHECK_INTERVAL_SECONDS = int(os.environ.get("UPDATE_CHECK_INTERVAL_SECONDS") or "21600")
+    UPDATE_CHECK_TIMEOUT_SECONDS = int(os.environ.get("UPDATE_CHECK_TIMEOUT_SECONDS") or "4")
+
     BASIC_AUTH_ENABLED = os.environ.get("BASIC_AUTH_ENABLED", "true").lower() == "true"
     BASIC_AUTH_REALM = os.environ.get("BASIC_AUTH_REALM", "cert-manager")
     # Verified Basic Auth credentials are cached in memory for this many
