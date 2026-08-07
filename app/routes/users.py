@@ -1,10 +1,11 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import current_user
 
 from ..decorators import admin_required
 from ..extensions import db
 from ..models.user import User
 from ..models.audit_log import AuditLog
+from ..responses import wants_json
 from ..services import audit_service
 
 users_bp = Blueprint("users", __name__, url_prefix="/users")
@@ -14,6 +15,8 @@ users_bp = Blueprint("users", __name__, url_prefix="/users")
 @admin_required
 def list_users():
     users = User.query.order_by(User.created_at.desc()).all()
+    if wants_json():
+        return jsonify([u.to_dict() for u in users])
     return render_template("users/list.html", users=users)
 
 
@@ -145,4 +148,12 @@ def audit_log():
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
+    if wants_json():
+        return jsonify({
+            "items": [log.to_dict() for log in logs.items],
+            "page": logs.page,
+            "per_page": logs.per_page,
+            "total": logs.total,
+            "pages": logs.pages,
+        })
     return render_template("users/audit_log.html", logs=logs)

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from ..extensions import db
+from ..serialization import iso
 
 
 class CertificateAuthority(db.Model):
@@ -67,6 +68,35 @@ class CertificateAuthority(db.Model):
         return cls.query.filter_by(is_revoked=False).filter(
             db.or_(cls.key_backend == "softhsm", cls.private_key_enc != b"")
         )
+
+    def to_dict(self, detail=False):
+        d = {
+            "id": self.id,
+            "name": self.name,
+            "common_name": self.common_name,
+            "serial_number": self.serial_number,
+            "key_type": self.key_type,
+            "key_size": self.key_size,
+            "key_backend": self.key_backend,
+            "is_root": self.is_root,
+            "parent_id": self.parent_id,
+            "not_before": iso(self.not_before),
+            "not_after": iso(self.not_after),
+            "is_revoked": self.is_revoked,
+            "has_private_key": self.has_private_key,
+            "has_signing_key": self.has_signing_key,
+            "is_exportable": self.is_exportable,
+            "created_at": iso(self.created_at),
+        }
+        if detail:
+            d.update({
+                "path_length": self.path_length,
+                "crl_number": self.crl_number,
+                "revoked_at": iso(self.revoked_at),
+                "revocation_reason": self.revocation_reason,
+                "certificate_pem": self.certificate_pem,
+            })
+        return d
 
     def __repr__(self):
         return f"<CA {self.name}>"

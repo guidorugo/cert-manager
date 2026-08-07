@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from ..extensions import db
+from ..serialization import iso, json_or_none
 
 
 class AuditLog(db.Model):
@@ -15,6 +16,19 @@ class AuditLog(db.Model):
     target_id = db.Column(db.Integer, nullable=True)
     details = db.Column(db.Text, nullable=True)
     ip_address = db.Column(db.String(45), nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "timestamp": iso(self.timestamp),
+            "user_id": self.user_id,
+            "username": self.username,
+            "action": self.action,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "details": json_or_none(self.details),
+            "ip_address": self.ip_address,
+        }
 
     def __repr__(self):
         return f"<AuditLog {self.action} by {self.username}>"

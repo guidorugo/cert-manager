@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from ..extensions import db
+from ..serialization import iso, json_or_none
 
 
 class CertificateSigningRequest(db.Model):
@@ -19,6 +20,24 @@ class CertificateSigningRequest(db.Model):
 
     certificate = db.relationship("Certificate", backref="csr")
     creator = db.relationship("User", backref="csrs", foreign_keys=[created_by])
+
+    def to_dict(self, detail=False):
+        d = {
+            "id": self.id,
+            "common_name": self.common_name,
+            "status": self.status,
+            "ca_id": self.ca_id,
+            "certificate_id": self.certificate_id,
+            "created_by": self.created_by,
+            "created_at": iso(self.created_at),
+        }
+        if detail:
+            d.update({
+                "subject": json_or_none(self.subject_json),
+                "sans": json_or_none(self.san_json),
+                "csr_pem": self.csr_pem,
+            })
+        return d
 
     def __repr__(self):
         return f"<CSR {self.common_name} ({self.status})>"
